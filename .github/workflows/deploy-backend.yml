@@ -1,0 +1,37 @@
+# ================================================================
+# DispatchIQ — Backend Deploy (Railway)
+# Triggers on push to main branch only.
+# Deploys the FastAPI backend to Railway.
+# ================================================================
+
+name: Deploy Backend
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "backend/**"
+      - ".github/workflows/deploy-backend.yml"
+
+jobs:
+  deploy:
+    name: Deploy to Railway
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy to Railway
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          cd backend
+          railway up --service dispatchiq-backend --detach
+
+      - name: Confirm deployment
+        run: echo "Backend deployed to Railway at $(date -u)"
