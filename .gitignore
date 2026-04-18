@@ -37,3 +37,6 @@ pip-delete-this-directory.txt
 # Secrets and Environment
 .env
 backend/.env
+
+backend/.env
+.env
