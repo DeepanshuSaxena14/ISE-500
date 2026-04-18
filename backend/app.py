@@ -255,9 +255,6 @@ def normalize_driver(item: dict) -> DriverProfile:
     last = basic.get("driver_last_name")
     full_name = " ".join(part for part in [first, last] if part).strip() or None
 
-    raw_load_id = current_load.get("load_id")
-    normalized_load_id = str(raw_load_id) if raw_load_id is not None else None
-
     return DriverProfile(
         driver_id=int(item["driver_id"]),
         first_name=first,
@@ -272,7 +269,7 @@ def normalize_driver(item: dict) -> DriverProfile:
         last_known_location=loc.get("last_known_location"),
         latest_update=loc.get("latest_update"),
         timezone=loc.get("timezone"),
-        current_load_id=normalized_load_id,
+        current_load_id=current_load.get("load_id"),
         current_load_show_id=current_load.get("load_show_id"),
         current_load_origin=current_load.get("origin"),
         current_load_destination=current_load.get("destination"),
