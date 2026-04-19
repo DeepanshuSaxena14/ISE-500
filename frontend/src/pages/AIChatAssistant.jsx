@@ -75,7 +75,6 @@ function timeStr() {
 function parseAIResponse(raw) {
   try {
     const clean = raw.replace(/```json|```/g, "").trim();
-    // find first { to last }
     const start = clean.indexOf("{");
     const end = clean.lastIndexOf("}");
     if (start === -1 || end === -1) throw new Error("no json");
@@ -160,25 +159,21 @@ function AIMessageCard({ msg }) {
 
   return (
     <div style={{ border: `0.5px solid ${severityBorder}`, background: severityBg, borderRadius: 10, padding: "12px 14px", marginBottom: 2 }}>
-      {/* Type badge + headline */}
       <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 8 }}>
         <span style={{ fontSize: 11, color: typeColor, marginTop: 1, flexShrink: 0 }}>{typeIcon}</span>
         <h3 style={{ fontSize: 13, fontWeight: 700, color: "#f1f5f9", margin: 0, lineHeight: 1.3 }}>{data.headline}</h3>
       </div>
 
-      {/* Summary */}
       {data.summary && (
         <p style={{ fontSize: 11, color: "rgba(255,255,255,.6)", lineHeight: 1.65, margin: "0 0 10px 0", paddingLeft: 19 }}>{data.summary}</p>
       )}
 
-      {/* Driver chips */}
       {data.drivers?.length > 0 && (
         <div style={{ paddingLeft: 19, marginBottom: 8 }}>
           {data.drivers.map((d, i) => <DriverChip key={i} driver={d} />)}
         </div>
       )}
 
-      {/* Table rows */}
       {data.tableRows?.length > 0 && (
         <div style={{ paddingLeft: 19, marginBottom: 8 }}>
           <div style={{ border: "0.5px solid rgba(255,255,255,.08)", borderRadius: 7, overflow: "hidden" }}>
@@ -192,7 +187,6 @@ function AIMessageCard({ msg }) {
         </div>
       )}
 
-      {/* Action buttons */}
       {data.actions?.length > 0 && (
         <div style={{ paddingLeft: 19, display: "flex", gap: 6, flexWrap: "wrap" }}>
           {data.actions.map((action, i) => {
@@ -238,7 +232,7 @@ export default function AIChatAssistant() {
   const [loading, setLoading] = useState(false);
   const [showSuggested, setShowSuggested] = useState(true);
   const [conversationHistory, setConversationHistory] = useState([]);
-  const [isAudioLoading, setIsAudioLoading] = useState(null); // stores message index or 'briefing' etc
+  const [isAudioLoading, setIsAudioLoading] = useState(null);
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -251,13 +245,19 @@ export default function AIChatAssistant() {
     if (!text) return;
     setIsAudioLoading(id);
     try {
-      const resp = await fetch("http://localhost:5001/api/voice/tts", {
+      const AI_URL = import.meta.env.VITE_AI_URL || "http://localhost:5001";
+      const resp = await fetch(`${AI_URL}/api/tts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text })
       });
       if (!resp.ok) throw new Error("TTS failed");
-      const blob = await resp.blob();
+      const data = await resp.json();
+      if (!data.audio_b64) throw new Error(data.error || "No audio returned");
+      const binary = atob(data.audio_b64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const blob = new Blob([bytes], { type: "audio/mpeg" });
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       audio.onended = () => setIsAudioLoading(null);
@@ -269,13 +269,14 @@ export default function AIChatAssistant() {
   };
 
   const handleBriefing = async (type) => {
-    const prompt = type === 'fleet' 
+    const prompt = type === 'fleet'
       ? "Give me a very concise 2-sentence fleet status overview for an operational voice briefing."
       : "Summarize the top 2 most urgent critical alerts in 2 short sentences for a voice briefing.";
-    
+
     setIsAudioLoading(type);
     try {
-      const resp = await fetch("http://localhost:5001/api/chat", {
+      const AI_URL = import.meta.env.VITE_AI_URL || "http://localhost:5001";
+      const resp = await fetch(`${AI_URL}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: prompt, history: [] })
@@ -387,8 +388,7 @@ export default function AIChatAssistant() {
       </div>
 
       <div className="flex-1 flex flex-col min-h-0 bg-white/[0.02] border border-white/[0.05] rounded-2xl p-6 overflow-hidden relative">
-        {/* ── MESSAGES ── */}
-        
+
         {/* Voice Dashboard */}
         <div style={{ background: "rgba(29,158,117,.03)", border: "0.5px solid rgba(29,158,117,.15)", borderRadius: 12, padding: "14px", marginBottom: 20, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -399,7 +399,7 @@ export default function AIChatAssistant() {
             </div>
           </div>
           <div style={{ display: "flex", gap: 6 }}>
-            <button 
+            <button
               onClick={() => handleBriefing('fleet')}
               disabled={isAudioLoading !== null}
               style={{ background: "rgba(255,255,255,.05)", border: "0.5px solid rgba(255,255,255,.1)", borderRadius: 6, color: "#f1f5f9", fontSize: 9, fontWeight: 600, padding: "5px 10px", cursor: "pointer", transition: "all 0.2s", display: "flex", alignItems: "center", gap: 6 }}
@@ -408,7 +408,7 @@ export default function AIChatAssistant() {
             >
               {isAudioLoading === 'fleet' ? "⌛" : "▶"} Play Fleet Briefing
             </button>
-            <button 
+            <button
               onClick={() => handleBriefing('alerts')}
               disabled={isAudioLoading !== null}
               style={{ background: "rgba(248,113,113,.08)", border: "0.5px solid rgba(248,113,113,.15)", borderRadius: 6, color: "#f87171", fontSize: 9, fontWeight: 600, padding: "5px 10px", cursor: "pointer", transition: "all 0.2s", display: "flex", alignItems: "center", gap: 6 }}
@@ -424,28 +424,26 @@ export default function AIChatAssistant() {
 
           {messages.map((msg) => (
             <div key={msg.id} className="msg-in" style={{ display: "flex", flexDirection: "column", alignItems: msg.role === "user" ? "flex-end" : "flex-start", gap: 4 }}>
-              {/* Sender row */}
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    {msg.role === "ai" && (
-                      <div style={{ width: 22, height: 22, borderRadius: 5, background: "rgba(29,158,117,.15)", border: "0.5px solid rgba(29,158,117,.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8, fontWeight: 700, color: "#34d399", letterSpacing: "0.05em" }}>AI</div>
-                    )}
-                    <span style={{ fontSize: 9, color: "rgba(255,255,255,.25)" }}>{msg.role === "ai" ? "DispatchIQ" : "You"} · {msg.time}</span>
-                    {msg.role === "ai" && (
-                      <button 
-                        onClick={() => playAudioFromText(msg.text || (msg.parsed && msg.parsed.summary), msg.id)}
-                        disabled={isAudioLoading !== null}
-                        style={{ background: "none", border: "none", cursor: "pointer", color: isAudioLoading === msg.id ? "#34d399" : "rgba(255,255,255,.15)", fontSize: 11, padding: 0, marginLeft: 2, display: "flex", alignItems: "center", transition: "color 0.2s" }}
-                        title="Speak response"
-                      >
-                        {isAudioLoading === msg.id ? "⌛" : "🔊"}
-                      </button>
-                    )}
-                    {msg.role === "user" && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                {msg.role === "ai" && (
+                  <div style={{ width: 22, height: 22, borderRadius: 5, background: "rgba(29,158,117,.15)", border: "0.5px solid rgba(29,158,117,.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8, fontWeight: 700, color: "#34d399", letterSpacing: "0.05em" }}>AI</div>
+                )}
+                <span style={{ fontSize: 9, color: "rgba(255,255,255,.25)" }}>{msg.role === "ai" ? "DispatchIQ" : "You"} · {msg.time}</span>
+                {msg.role === "ai" && (
+                  <button
+                    onClick={() => playAudioFromText(msg.text || (msg.parsed && msg.parsed.summary), msg.id)}
+                    disabled={isAudioLoading !== null}
+                    style={{ background: "none", border: "none", cursor: "pointer", color: isAudioLoading === msg.id ? "#34d399" : "rgba(255,255,255,.15)", fontSize: 11, padding: 0, marginLeft: 2, display: "flex", alignItems: "center", transition: "color 0.2s" }}
+                    title="Speak response"
+                  >
+                    {isAudioLoading === msg.id ? "⌛" : "🔊"}
+                  </button>
+                )}
+                {msg.role === "user" && (
                   <div style={{ width: 22, height: 22, borderRadius: 5, background: "rgba(255,255,255,.07)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8, fontWeight: 700, color: "rgba(255,255,255,.5)" }}>ME</div>
                 )}
               </div>
 
-              {/* Bubble */}
               {msg.role === "user" ? (
                 <div style={{ maxWidth: "72%", background: "rgba(29,158,117,.12)", border: "0.5px solid rgba(29,158,117,.25)", borderRadius: "10px 10px 2px 10px", padding: "9px 13px", fontSize: 13, color: "rgba(255,255,255,.85)", lineHeight: 1.5 }}>
                   {msg.text}
@@ -473,7 +471,7 @@ export default function AIChatAssistant() {
           <div ref={bottomRef} />
         </div>
 
-        {/* ── SUGGESTIONS ── */}
+        {/* Suggestions */}
         {showSuggested && (
           <div style={{ padding: "0 0 12px 0", flexShrink: 0 }}>
             <div style={{ fontSize: 9, color: "rgba(255,255,255,.25)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 7 }}>Suggested queries</div>
@@ -488,7 +486,7 @@ export default function AIChatAssistant() {
           </div>
         )}
 
-        {/* ── INPUT ── */}
+        {/* Input */}
         <div style={{ borderTop: "0.5px solid rgba(255,255,255,.07)", padding: "12px 0", flexShrink: 0, background: "transparent" }}>
           <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
             <div style={{ flex: 1, background: "rgba(255,255,255,.05)", border: `0.5px solid ${loading ? "rgba(29,158,117,.2)" : "rgba(255,255,255,.1)"}`, borderRadius: 10, padding: "10px 14px", transition: "border-color .2s" }}>
