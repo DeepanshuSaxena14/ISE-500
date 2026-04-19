@@ -73,380 +73,213 @@ def city_state(name: str) -> str:
 # are shaped for your Flask backend.
 # ============================================================
 
-_BASE_DRIVERS: list[dict] = [
-    {
-        "driver_id": 12154,
-        "full_name": "Marcus Rivera",
-        "carrier": "DispatchIQ Freight",
-        "work_status": "IN_TRANSIT",
-        "terminal": "Phoenix Terminal",
-        "driver_type": "COMPANY_DRIVER",
-        "phone": "+1-602-555-0101",
-        "email": "marcus.rivera@dispatchiq.test",
-        "last_known_location": "Buckeye, AZ",
-        "timezone": "MST",
-        "current_load": {
-            "load_id": 700101,
-            "load_show_id": "LD-4821",
-            "origin": "Phoenix, AZ",
-            "destination": "Dallas, TX",
-            "pickup_offset_hours": -10,
-            "delivery_offset_hours": 12,
-        },
-    },
-    {
-        "driver_id": 12155,
-        "full_name": "Sandra Kim",
-        "carrier": "DispatchIQ Freight",
-        "work_status": "ON_DUTY",
-        "terminal": "Los Angeles Terminal",
-        "driver_type": "COMPANY_DRIVER",
-        "phone": "+1-602-555-0102",
-        "email": "sandra.kim@dispatchiq.test",
-        "last_known_location": "Los Angeles, CA",
-        "timezone": "PDT",
-        "current_load": {
-            "load_id": 700102,
-            "load_show_id": "LD-4798",
-            "origin": "Los Angeles, CA",
-            "destination": "Albuquerque, NM",
-            "pickup_offset_hours": -3,
-            "delivery_offset_hours": 9,
-        },
-    },
-    {
-        "driver_id": 12156,
-        "full_name": "James Okafor",
-        "carrier": "DispatchIQ Freight",
-        "work_status": "DRIVING",
-        "terminal": "Albuquerque Terminal",
-        "driver_type": "OWNER_OPERATOR_OO",
-        "phone": "+1-602-555-0103",
-        "email": "james.okafor@dispatchiq.test",
-        "last_known_location": "Albuquerque, NM",
-        "timezone": "MDT",
-        "current_load": {
-            "load_id": 700103,
-            "load_show_id": "LD-4809",
-            "origin": "Albuquerque, NM",
-            "destination": "Phoenix, AZ",
-            "pickup_offset_hours": -6,
-            "delivery_offset_hours": 3,
-        },
-    },
-    {
-        "driver_id": 12157,
-        "full_name": "Tanya Reyes",
-        "carrier": "DispatchIQ Freight",
-        "work_status": "AVAILABLE",
-        "terminal": "Phoenix Terminal",
-        "driver_type": "COMPANY_DRIVER",
-        "phone": "+1-602-555-0104",
-        "email": "tanya.reyes@dispatchiq.test",
-        "last_known_location": "Phoenix, AZ",
-        "timezone": "MST",
-        "current_load": None,
-    },
-    {
-        "driver_id": 12158,
-        "full_name": "Devon Carter",
-        "carrier": "DispatchIQ Freight",
-        "work_status": "IN_TRANSIT",
-        "terminal": "Flagstaff Terminal",
-        "driver_type": "COMPANY_DRIVER",
-        "phone": "+1-602-555-0105",
-        "email": "devon.carter@dispatchiq.test",
-        "last_known_location": "Flagstaff, AZ",
-        "timezone": "MST",
-        "current_load": {
-            "load_id": 700104,
-            "load_show_id": "LD-4815",
-            "origin": "Albuquerque, NM",
-            "destination": "Flagstaff, AZ",
-            "pickup_offset_hours": -5,
-            "delivery_offset_hours": 4,
-        },
-    },
-    {
-        "driver_id": 12159,
-        "full_name": "Priya Nair",
-        "carrier": "DispatchIQ Freight",
-        "work_status": "OFF_DUTY",
-        "terminal": "Tempe Terminal",
-        "driver_type": "COMPANY_DRIVER",
-        "phone": "+1-602-555-0106",
-        "email": "priya.nair@dispatchiq.test",
-        "last_known_location": "Tempe, AZ",
-        "timezone": "MST",
-        "current_load": None,
-    },
-    {
-        "driver_id": 12160,
-        "full_name": "Luis Mendoza",
-        "carrier": "DispatchIQ Freight",
-        "work_status": "IN_TRANSIT",
-        "terminal": "Phoenix Terminal",
-        "driver_type": "OWNER_OPERATOR_OO",
-        "phone": "+1-602-555-0107",
-        "email": "luis.mendoza@dispatchiq.test",
-        "last_known_location": "Camp Verde, AZ",
-        "timezone": "MST",
-        "current_load": {
-            "load_id": 700105,
-            "load_show_id": "LD-4822",
-            "origin": "Phoenix, AZ",
-            "destination": "Flagstaff, AZ",
-            "pickup_offset_hours": -2,
-            "delivery_offset_hours": 2,
-        },
-    },
-    {
-        "driver_id": 12161,
-        "full_name": "Rachel Stone",
-        "carrier": "DispatchIQ Freight",
-        "work_status": "IN_TRANSIT",
-        "terminal": "Phoenix Terminal",
-        "driver_type": "COMPANY_DRIVER",
-        "phone": "+1-602-555-0108",
-        "email": "rachel.stone@dispatchiq.test",
-        "last_known_location": "Quartzsite, AZ",
-        "timezone": "MST",
-        "current_load": {
-            "load_id": 700106,
-            "load_show_id": "LD-4817",
-            "origin": "Phoenix, AZ",
-            "destination": "Las Vegas, NV",
-            "pickup_offset_hours": -4,
-            "delivery_offset_hours": 5,
-        },
-    },
+_BASE_DRIVERS: list[dict] = []
+_BASE_VEHICLES: list[dict] = []
+_BASE_PERFORMANCE: list[dict] = []
+
+import random
+
+# Fix the seed so restarts generate identical mock environments unless changed
+random.seed(42)
+
+FIRST_NAMES = ["James", "John", "Robert", "Michael", "William", "David", "Richard", "Joseph", "Thomas", "Charles", "Sandra", "Tanya", "Priya", "Marcus", "Luis", "Devon", "Rachel", "Sarah", "Jessica", "Ashley", "Brian", "Kevin", "Jason", "Matthew", "Gary", "Timothy", "Jose", "Larry", "Jeffrey"]
+LAST_NAMES = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis", "Rodriguez", "Martinez", "Reyes", "Nair", "Mendoza", "Carter", "Stone", "Anderson", "Taylor", "Thomas", "Hernandez", "Moore", "Martin", "Jackson", "Thompson", "White"]
+
+# 10 specific regions mirroring the 10 exact loads
+CITIES = [
+    "Phoenix, AZ", "Los Angeles, CA", "Dallas, TX", "Seattle, WA", 
+    "Chicago, IL", "Atlanta, GA", "New York, NY", "Miami, FL", 
+    "Denver, CO", "Salt Lake City, UT"
 ]
 
-_BASE_VEHICLES: list[dict] = [
-    {
-        "vehicle_id": 840301,
+# We want exactly 5 drivers per city to ensure proper competitive variance. 
+# 1 flatbed, 1 reefer, 2 vans, 1 pneumatic for each city.
+TRAILER_DISTRIBUTION = ["VAN", "VAN", "REEFER", "FLATBED", "PNEUMATIC"]
+
+for i in range(50):
+    driver_id = 12000 + i + 1
+    fname = random.choice(FIRST_NAMES)
+    lname = random.choice(LAST_NAMES)
+    
+    # Exactly 5 drivers per city
+    city_idx = i // 5
+    city = CITIES[city_idx]
+    terminal = city.split(",")[0] + " Hub"
+    
+    # Ensuring exact variance of trailer types perfectly evenly distributed per city
+    trailer_type = TRAILER_DISTRIBUTION[i % 5]
+    
+    # Base configuration: 3 AVAILABLE, 2 IN_TRANSIT per city
+    _BASE_DRIVERS.append({
+        "driver_id": driver_id,
+        "full_name": f"{fname} {lname}",
+        "carrier": "DispatchIQ Freight",
+        "work_status": "AVAILABLE" if (i % 5) < 3 else "IN_TRANSIT",
+        "terminal": terminal,
+        "driver_type": "COMPANY_DRIVER" if i % 2 == 0 else "OWNER_OPERATOR_OO",
+        "phone": f"+1-602-555-{driver_id:04d}",
+        "email": f"{fname.lower()}.{lname.lower()}{driver_id}@dispatchiq.test",
+        "last_known_location": city,
+        "timezone": "UTC",
+        "current_load": None
+    })
+
+    _BASE_VEHICLES.append({
+        "vehicle_id": 840000 + i + 1,
         "owner_id": 49845,
         "owner_name": "DispatchIQ Freight",
         "vehicle_status": "ACTIVE",
-        "vehicle_no": "TRK-301",
+        "vehicle_no": f"TRK-{300+driver_id}",
         "vehicle_type": "TRUCK",
-        "vehicle_vin": "1DQM3010000000001",
+        "vehicle_vin": f"1DQM30{driver_id:03d}0000{driver_id}",
         "gross_vehicle_weight": 80000,
-        "trailer_type": "VAN",
+        "trailer_type": trailer_type,
         "vehicle_make": "Freightliner",
         "vehicle_model": "Cascadia",
-        "assigned_driver_ids": [12154],
-    },
-    {
-        "vehicle_id": 840302,
-        "owner_id": 49845,
-        "owner_name": "DispatchIQ Freight",
-        "vehicle_status": "ACTIVE",
-        "vehicle_no": "TRK-302",
-        "vehicle_type": "TRUCK",
-        "vehicle_vin": "1DQM3020000000002",
-        "gross_vehicle_weight": 80000,
-        "trailer_type": "REEFER",
-        "vehicle_make": "Peterbilt",
-        "vehicle_model": "579",
-        "assigned_driver_ids": [12155],
-    },
-    {
-        "vehicle_id": 840303,
-        "owner_id": 49845,
-        "owner_name": "DispatchIQ Freight",
-        "vehicle_status": "ACTIVE",
-        "vehicle_no": "TRK-303",
-        "vehicle_type": "TRUCK",
-        "vehicle_vin": "1DQM3030000000003",
-        "gross_vehicle_weight": 80000,
-        "trailer_type": "VAN",
-        "vehicle_make": "Kenworth",
-        "vehicle_model": "T680",
-        "assigned_driver_ids": [12156],
-    },
-    {
-        "vehicle_id": 840304,
-        "owner_id": 49845,
-        "owner_name": "DispatchIQ Freight",
-        "vehicle_status": "ACTIVE",
-        "vehicle_no": "TRK-304",
-        "vehicle_type": "TRUCK",
-        "vehicle_vin": "1DQM3040000000004",
-        "gross_vehicle_weight": 80000,
-        "trailer_type": "VAN",
-        "vehicle_make": "Volvo",
-        "vehicle_model": "VNL",
-        "assigned_driver_ids": [12157],
-    },
-    {
-        "vehicle_id": 840305,
-        "owner_id": 49845,
-        "owner_name": "DispatchIQ Freight",
-        "vehicle_status": "ACTIVE",
-        "vehicle_no": "TRK-305",
-        "vehicle_type": "TRUCK",
-        "vehicle_vin": "1DQM3050000000005",
-        "gross_vehicle_weight": 80000,
-        "trailer_type": "FLATBED",
-        "vehicle_make": "Mack",
-        "vehicle_model": "Anthem",
-        "assigned_driver_ids": [12158],
-    },
-    {
-        "vehicle_id": 840306,
-        "owner_id": 49845,
-        "owner_name": "DispatchIQ Freight",
-        "vehicle_status": "INACTIVE",
-        "vehicle_no": "TRK-306",
-        "vehicle_type": "TRUCK",
-        "vehicle_vin": "1DQM3060000000006",
-        "gross_vehicle_weight": 80000,
-        "trailer_type": "VAN",
-        "vehicle_make": "International",
-        "vehicle_model": "LT",
-        "assigned_driver_ids": [12159],
-    },
-    {
-        "vehicle_id": 840307,
-        "owner_id": 49845,
-        "owner_name": "DispatchIQ Freight",
-        "vehicle_status": "ACTIVE",
-        "vehicle_no": "TRK-307",
-        "vehicle_type": "TRUCK",
-        "vehicle_vin": "1DQM3070000000007",
-        "gross_vehicle_weight": 80000,
-        "trailer_type": "VAN",
-        "vehicle_make": "Freightliner",
-        "vehicle_model": "Cascadia",
-        "assigned_driver_ids": [12160],
-    },
-    {
-        "vehicle_id": 840308,
-        "owner_id": 49845,
-        "owner_name": "DispatchIQ Freight",
-        "vehicle_status": "ACTIVE",
-        "vehicle_no": "TRK-308",
-        "vehicle_type": "TRUCK",
-        "vehicle_vin": "1DQM3080000000008",
-        "gross_vehicle_weight": 80000,
-        "trailer_type": "VAN",
-        "vehicle_make": "Peterbilt",
-        "vehicle_model": "567",
-        "assigned_driver_ids": [12161],
-    },
-]
+        "assigned_driver_ids": [driver_id],
+    })
 
-_BASE_PERFORMANCE: list[dict] = [
-    {
-        "driver_id": 12154,
-        "oor_miles": 12.5,
-        "schedule_miles": 1027.0,
-        "actual_miles": 1036.0,
-        "schedule_time": 960,
-        "actual_time": 995,
-    },
-    {
-        "driver_id": 12155,
-        "oor_miles": 18.0,
-        "schedule_miles": 790.0,
-        "actual_miles": 818.0,
-        "schedule_time": 780,
-        "actual_time": 860,
-    },
-    {
-        "driver_id": 12156,
-        "oor_miles": 31.0,
-        "schedule_miles": 460.0,
-        "actual_miles": 501.0,
-        "schedule_time": 420,
-        "actual_time": 498,
-    },
-    {
-        "driver_id": 12157,
-        "oor_miles": 2.0,
-        "schedule_miles": 450.0,
-        "actual_miles": 451.0,
-        "schedule_time": 470,
-        "actual_time": 466,
-    },
-    {
-        "driver_id": 12158,
-        "oor_miles": 22.0,
-        "schedule_miles": 325.0,
-        "actual_miles": 357.0,
-        "schedule_time": 360,
-        "actual_time": 421,
-    },
-    {
-        "driver_id": 12159,
-        "oor_miles": 0.0,
-        "schedule_miles": 400.0,
-        "actual_miles": 398.0,
-        "schedule_time": 450,
-        "actual_time": 448,
-    },
-    {
-        "driver_id": 12160,
-        "oor_miles": 4.0,
-        "schedule_miles": 145.0,
-        "actual_miles": 148.0,
-        "schedule_time": 160,
-        "actual_time": 163,
-    },
-    {
-        "driver_id": 12161,
-        "oor_miles": 6.0,
-        "schedule_miles": 285.0,
-        "actual_miles": 289.0,
-        "schedule_time": 300,
-        "actual_time": 309,
-    },
-]
+    # To guarantee a UNIQUE top driver among identically configured drivers, 
+    # we vary the actual_time/actual_miles ratio. The lower the index in the city block, the better the performance.
+    quality_modifier = 1.0 + ( (i % 5) * 0.05 )
+    sched_mi = 500.0
+    actual_mi = sched_mi * quality_modifier
+    oor_mi = actual_mi - sched_mi
+    sched_t = 500 # minutes
+    actual_t = int(sched_t * quality_modifier)
+    
+    _BASE_PERFORMANCE.append({
+        "driver_id": driver_id,
+        "oor_miles": round(oor_mi, 1),
+        "schedule_miles": round(sched_mi, 1),
+        "actual_miles": round(actual_mi, 1),
+        "schedule_time": int(sched_t),
+        "actual_time": int(actual_t),
+    })
 
-_BASE_LOAD_REQUESTS: list[dict] = [
+# Define 10 distinct, unique loads tightly coupled to the 10 Cities above
+_BASE_LOAD_REQUESTS = [
     {
-        "pickup_name": "Phoenix DC",
-        "pickup_address": "4300 W Buckeye Rd, Phoenix, AZ",
-        "pickup_lat": 33.4374,
-        "pickup_lng": -112.1521,
-        "dropoff_name": "Dallas Hub",
-        "dropoff_address": "1201 N Riverfront Blvd, Dallas, TX",
-        "dropoff_lat": 32.7876,
-        "dropoff_lng": -96.8044,
+        # Phoenix, AZ Load (Needs VAN) -> Target: Phoenix Driver #0 (Perfect VAN)
+        "pickup_name": "Phoenix DC", "pickup_address": "400 Phoenix Way, Phoenix, AZ",
+        "pickup_lat": 33.4374, "pickup_lng": -112.1521,
+        "dropoff_name": "Vegas Hub", "dropoff_address": "12 Vegas Blvd, Las Vegas, NV",
+        "dropoff_lat": 36.1699, "dropoff_lng": -115.1398,
         "pickup_time": iso_z(now_utc() + timedelta(hours=2)),
-        "dropoff_time": iso_z(now_utc() + timedelta(hours=22)),
-        "required_trailer_type": "VAN",
-        "required_vehicle_type": "TRUCK",
+        "dropoff_time": iso_z(now_utc() + timedelta(hours=18)),
+        "required_trailer_type": "VAN", "required_vehicle_type": "TRUCK",
+        "weight_lbs": 15000.0,
     },
     {
-        "pickup_name": "Tolleson Cold Storage",
-        "pickup_address": "8400 W Buckeye Rd, Tolleson, AZ",
-        "pickup_lat": 33.4362,
-        "pickup_lng": -112.2393,
-        "dropoff_name": "Albuquerque Foods DC",
-        "dropoff_address": "9001 San Mateo Blvd NE, Albuquerque, NM",
-        "dropoff_lat": 35.1702,
-        "dropoff_lng": -106.5851,
+        # Los Angeles, CA Load (Needs REEFER) -> Target: LA Driver #2 (REEFER)
+        "pickup_name": "LA Fresh Produce", "pickup_address": "88 LA Market, Los Angeles, CA",
+        "pickup_lat": 34.0522, "pickup_lng": -118.2437,
+        "dropoff_name": "San Jose Distribution", "dropoff_address": "90 San Jose Dr, San Jose, CA",
+        "dropoff_lat": 37.3382, "dropoff_lng": -121.8863,
         "pickup_time": iso_z(now_utc() + timedelta(hours=1)),
-        "dropoff_time": iso_z(now_utc() + timedelta(hours=11)),
-        "required_trailer_type": "REEFER",
-        "required_vehicle_type": "TRUCK",
+        "dropoff_time": iso_z(now_utc() + timedelta(hours=12)),
+        "required_trailer_type": "REEFER", "required_vehicle_type": "TRUCK",
+        "weight_lbs": 22000.0,
     },
     {
-        "pickup_name": "Mesa Metals Yard",
-        "pickup_address": "7120 E Ray Rd, Mesa, AZ",
-        "pickup_lat": 33.3191,
-        "pickup_lng": -111.6837,
-        "dropoff_name": "Flagstaff Materials Site",
-        "dropoff_address": "3940 E Huntington Dr, Flagstaff, AZ",
-        "dropoff_lat": 35.2230,
-        "dropoff_lng": -111.5829,
+        # Dallas, TX Load (Needs FLATBED) -> Target: Dallas Driver #3 (FLATBED)
+        "pickup_name": "Dallas Steel Yard", "pickup_address": "100 Steel Rd, Dallas, TX",
+        "pickup_lat": 32.7876, "pickup_lng": -96.8044,
+        "dropoff_name": "Austin Assembly", "dropoff_address": "55 Austin Ave, Austin, TX",
+        "dropoff_lat": 30.2672, "dropoff_lng": -97.7431,
+        "pickup_time": iso_z(now_utc() + timedelta(hours=4)),
+        "dropoff_time": iso_z(now_utc() + timedelta(hours=10)),
+        "required_trailer_type": "FLATBED", "required_vehicle_type": "TRUCK",
+        "weight_lbs": 35000.0,
+    },
+    {
+        # Seattle, WA Load (Needs VAN) -> Target: Seattle Driver #0
+        "pickup_name": "Seattle Tech Depot", "pickup_address": "1 Array St, Seattle, WA",
+        "pickup_lat": 47.6062, "pickup_lng": -122.3321,
+        "dropoff_name": "Portland Terminal", "dropoff_address": "400 PDX Blvd, Portland, OR",
+        "dropoff_lat": 45.5152, "dropoff_lng": -122.6784,
+        "pickup_time": iso_z(now_utc() + timedelta(hours=2)),
+        "dropoff_time": iso_z(now_utc() + timedelta(hours=6)),
+        "required_trailer_type": "VAN", "required_vehicle_type": "TRUCK",
+        "weight_lbs": 8000.0,
+    },
+    {
+        # Chicago, IL Load (Needs REEFER) -> Target: Chicago Driver #2
+        "pickup_name": "Chicago Meats", "pickup_address": "Meatpacking Dr, Chicago, IL",
+        "pickup_lat": 41.8781, "pickup_lng": -87.6298,
+        "dropoff_name": "Detroit Markets", "dropoff_address": "808 Motor City Way, Detroit, MI",
+        "dropoff_lat": 42.3314, "dropoff_lng": -83.0458,
+        "pickup_time": iso_z(now_utc() + timedelta(hours=5)),
+        "dropoff_time": iso_z(now_utc() + timedelta(hours=14)),
+        "required_trailer_type": "REEFER", "required_vehicle_type": "TRUCK",
+        "weight_lbs": 12000.0,
+    },
+    {
+        # Atlanta, GA Load (Needs FLATBED) -> Target: Atlanta Driver #3
+        "pickup_name": "Atlanta Lumber", "pickup_address": "Timber Rd, Atlanta, GA",
+        "pickup_lat": 33.7490, "pickup_lng": -84.3880,
+        "dropoff_name": "Nashville Builders", "dropoff_address": "700 Country Ln, Nashville, TN",
+        "dropoff_lat": 36.1627, "dropoff_lng": -86.7816,
         "pickup_time": iso_z(now_utc() + timedelta(hours=3)),
         "dropoff_time": iso_z(now_utc() + timedelta(hours=9)),
-        "required_trailer_type": "FLATBED",
-        "required_vehicle_type": "TRUCK",
+        "required_trailer_type": "FLATBED", "required_vehicle_type": "TRUCK",
+        "weight_lbs": 42000.0,
     },
+    {
+        # New York, NY Load (Needs VAN) -> Target: NY Driver #0
+        "pickup_name": "NY Port Authority", "pickup_address": "1 Port Way, New York, NY",
+        "pickup_lat": 40.7128, "pickup_lng": -74.0060,
+        "dropoff_name": "Philadelphia DC", "dropoff_address": "300 Liberty St, Philadelphia, PA",
+        "dropoff_lat": 39.9526, "dropoff_lng": -75.1652,
+        "pickup_time": iso_z(now_utc() + timedelta(hours=1)),
+        "dropoff_time": iso_z(now_utc() + timedelta(hours=4)),
+        "required_trailer_type": "VAN", "required_vehicle_type": "TRUCK",
+        "weight_lbs": 5000.0,
+    },
+    {
+        # Miami, FL Load (Needs REEFER) -> Target: Miami Driver #2
+        "pickup_name": "Miami Ports Imports", "pickup_address": "Ocean Blvd, Miami, FL",
+        "pickup_lat": 25.7617, "pickup_lng": -80.1918,
+        "dropoff_name": "Orlando Wholesale", "dropoff_address": "Disney Dr, Orlando, FL",
+        "dropoff_lat": 28.5383, "dropoff_lng": -81.3792,
+        "pickup_time": iso_z(now_utc() + timedelta(hours=2)),
+        "dropoff_time": iso_z(now_utc() + timedelta(hours=7)),
+        "required_trailer_type": "REEFER", "required_vehicle_type": "TRUCK",
+        "weight_lbs": 18000.0,
+    },
+    {
+        # Denver, CO Load (Needs FLATBED) -> Target: Denver Driver #3
+        "pickup_name": "Denver Machining", "pickup_address": "Mile High Way, Denver, CO",
+        "pickup_lat": 39.7392, "pickup_lng": -104.9903,
+        "dropoff_name": "Cheyenne Outpost", "dropoff_address": "Wyoming Rd, Cheyenne, WY",
+        "dropoff_lat": 41.1400, "dropoff_lng": -104.8202,
+        "pickup_time": iso_z(now_utc() + timedelta(hours=3)),
+        "dropoff_time": iso_z(now_utc() + timedelta(hours=6)),
+        "required_trailer_type": "FLATBED", "required_vehicle_type": "TRUCK",
+        "weight_lbs": 28000.0,
+    },
+    {
+        # Salt Lake City, UT Load (Needs VAN) -> Target: SLC Driver #0
+        "pickup_name": "Salt Lake Tech", "pickup_address": "Silicon Slopes, Salt Lake City, UT",
+        "pickup_lat": 40.7608, "pickup_lng": -111.8910,
+        "dropoff_name": "Boise Depot", "dropoff_address": "Potato Ln, Boise, ID",
+        "dropoff_lat": 43.6150, "dropoff_lng": -116.2023,
+        "pickup_time": iso_z(now_utc() + timedelta(hours=2)),
+        "dropoff_time": iso_z(now_utc() + timedelta(hours=10)),
+        "required_trailer_type": "VAN", "required_vehicle_type": "TRUCK",
+        "weight_lbs": 30000.0,
+    },
+    {
+        # Edge Case: Extreme Urgency + Overweight Risk for Consolidation
+        "pickup_name": "Emergency Parts Depot", "pickup_address": "99 Crisis Way, Seattle, WA",
+        "pickup_lat": 47.6062, "pickup_lng": -122.3321,
+        "dropoff_name": "Factory Z", "dropoff_address": "1 Factory Ln, Portland, OR",
+        "dropoff_lat": 45.5152, "dropoff_lng": -122.6784,
+        "pickup_time": iso_z(now_utc() + timedelta(minutes=45)), # Extremely tight
+        "dropoff_time": iso_z(now_utc() + timedelta(hours=5)),
+        "required_trailer_type": "VAN", "required_vehicle_type": "TRUCK",
+        "weight_lbs": 44000.0, # Heavy
+    }
 ]
 
 

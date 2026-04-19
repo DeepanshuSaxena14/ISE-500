@@ -7,12 +7,16 @@ import {
   Bell, 
   FileText, 
   Settings,
-  Truck
+  Truck,
+  Map as MapIcon,
+  UserPlus
 } from 'lucide-react';
 import { cn } from './ui/Button';
 
 const navItems = [
   { icon: LayoutDashboard, label: 'Fleet Dashboard', path: '/' },
+  { icon: UserPlus, label: 'Add Driver', path: '/add-driver' },
+  { icon: MapIcon, label: 'Add Load with Location', path: '/map' },
   { icon: Zap, label: 'Smart Dispatch', path: '/dispatch' },
   { icon: MessageSquare, label: 'AI Assistant', path: '/chat' },
   { icon: Bell, label: 'Alerts', path: '/alerts' },
