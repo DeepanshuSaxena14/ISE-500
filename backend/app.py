@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-import os
+import math
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,6 +20,32 @@ from ai.tools.llm import generate_text
 
 app = Flask(__name__)
 CORS(app)
+
+# ------------------------------------------------------------
+# Geospatial helpers
+# ------------------------------------------------------------
+
+CITY_COORDS = {
+    "Phoenix, AZ": (33.4484, -112.0740),
+    "Los Angeles, CA": (34.0522, -118.2437),
+    "Dallas, TX": (32.7767, -96.7970),
+    "Seattle, WA": (47.6062, -122.3321),
+    "Chicago, IL": (41.8781, -87.6298),
+    "Atlanta, GA": (33.7490, -84.3880),
+    "New York, NY": (40.7128, -74.0060),
+    "Miami, FL": (25.7617, -80.1918),
+    "Denver, CO": (39.7392, -104.9903),
+    "Salt Lake City, UT": (40.7608, -111.8910),
+}
+
+def haversine(lat1, lon1, lat2, lon2):
+    R = 3958.8 # Earth radius in miles
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (math.sin(dlat / 2) ** 2 +
+         math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2)
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
 
 # ------------------------------------------------------------
 # .env diagnostics
@@ -355,8 +381,6 @@ def extract_vehicle_driver_assignments(item: dict) -> list[dict]:
         }
         for driver_id in driver_ids
     ]
-    )
-
 
 def extract_vehicle_driver_assignments(item: dict) -> list[dict]:
     assignments = item.get("assignments_drivers", {}) or {}
@@ -568,10 +592,95 @@ def build_dispatch_candidates() -> List[DispatchCandidate]:
 
 
 # ============================================================
-# Frontend-ready driver card shape
+# Supabase fetch helpers
 # ============================================================
 
-def build_driver_card(candidate: DispatchCandidate) -> dict:
+def fetch_all_drivers() -> list[DriverProfile]:
+    res = supabase.table("drivers").select("*").execute()
+    return [DriverProfile(**row) for row in (res.data or [])]
+
+
+def fetch_all_vehicles() -> list[VehicleRecord]:
+    res = supabase.table("vehicles").select("*").execute()
+    return [VehicleRecord(**row) for row in (res.data or [])]
+
+
+def fetch_all_performance() -> dict[int, DriverPerformance]:
+    res = supabase.table("driver_performance").select("*").execute()
+    perf_map: dict[int, DriverPerformance] = {}
+
+    for row in (res.data or []):
+        perf = DriverPerformance(
+            driver_id=int(row["driver_id"]),
+            oor_miles=float(row["oor_miles"]),
+            schedule_miles=float(row["schedule_miles"]),
+            actual_miles=float(row["actual_miles"]),
+            schedule_time=int(row["schedule_time"]),
+            actual_time=int(row["actual_time"]),
+            created_at=row.get("created_at"),
+            updated_at=row.get("updated_at"),
+        )
+        perf_map[perf.driver_id] = perf
+
+    return perf_map
+
+
+def fetch_vehicle_assignments() -> dict[int, VehicleRecord]:
+    assignments_res = supabase.table("vehicle_driver_assignments").select("vehicle_id,driver_id").execute()
+    vehicles = fetch_all_vehicles()
+    vehicle_by_id = {vehicle.vehicle_id: vehicle for vehicle in vehicles}
+
+    vehicle_by_driver: dict[int, VehicleRecord] = {}
+    for row in (assignments_res.data or []):
+        vehicle = vehicle_by_id.get(int(row["vehicle_id"]))
+        if vehicle:
+            vehicle_by_driver[int(row["driver_id"])] = vehicle
+
+    return vehicle_by_driver
+
+
+def fetch_load(load_id: str) -> Optional[LoadRecord]:
+    res = supabase.table("loads").select("*").eq("id", load_id).limit(1).execute()
+    if not res.data:
+        return None
+
+    row = res.data[0]
+    return LoadRecord(
+        id=row["id"],
+        pickup_name=row["pickup_name"],
+        pickup_address=row["pickup_address"],
+        pickup_lat=float(row["pickup_lat"]),
+        pickup_lng=float(row["pickup_lng"]),
+        dropoff_name=row["dropoff_name"],
+        dropoff_address=row["dropoff_address"],
+        dropoff_lat=float(row["dropoff_lat"]),
+        dropoff_lng=float(row["dropoff_lng"]),
+        pickup_time=row["pickup_time"],
+        dropoff_time=row["dropoff_time"],
+        required_trailer_type=row.get("required_trailer_type"),
+        required_vehicle_type=row.get("required_vehicle_type"),
+        created_at=row.get("created_at"),
+    )
+
+
+def build_dispatch_candidates() -> List[DispatchCandidate]:
+    drivers = fetch_all_drivers()
+    vehicle_by_driver = fetch_vehicle_assignments()
+    performance_by_driver = fetch_all_performance()
+
+    candidates: List[DispatchCandidate] = []
+    for driver in drivers:
+        candidates.append(
+            DispatchCandidate(
+                driver=driver,
+                vehicle=vehicle_by_driver.get(driver.driver_id),
+                performance=performance_by_driver.get(driver.driver_id),
+            )
+        )
+    return candidates
+
+
+def build_driver_card(candidate: DispatchCandidate, load: Optional[LoadRecord] = None) -> dict:
     driver = candidate.driver
     vehicle = candidate.vehicle
     perf = candidate.performance
@@ -583,7 +692,30 @@ def build_driver_card(candidate: DispatchCandidate) -> dict:
 
     alerts = build_alerts(driver, vehicle, perf)
 
-    return {
+    # Calculate Distance/Proximity
+    distance = 0.0
+    if load and driver.last_known_location in CITY_COORDS:
+        d_lat, d_lon = CITY_COORDS[driver.last_known_location]
+        distance = haversine(d_lat, d_lon, load.pickup_lat, load.pickup_lng)
+
+    # Calculate Mock HOS (Hours of Service)
+    # Available = full 11h, In Transit = partial
+    hos_base = 11.0 if driver.work_status == "AVAILABLE" else 5.5
+    # Deterministic drift based on ID
+    hos_remaining = max(0.0, hos_base - ((driver.driver_id % 10) * 0.5))
+
+    # Calculate Distance/Proximity
+    distance = 0.0
+    if load and driver.last_known_location in CITY_COORDS:
+        d_lat, d_lon = CITY_COORDS[driver.last_known_location]
+        distance = haversine(d_lat, d_lon, load.pickup_lat, load.pickup_lng)
+
+    # Calculate Mock HOS (Hours of Service)
+    # Available = full 11h, In Transit = partial
+    hos_base = 11.0 if driver.work_status == "AVAILABLE" else 5.5
+    # Deterministic drift based on ID
+    hos_remaining = max(0.0, hos_base - ((driver.driver_id % 10) * 0.5))
+
     return {
         "driver_id": driver.driver_id,
         "name": driver.full_name,
@@ -603,10 +735,11 @@ def build_driver_card(candidate: DispatchCandidate) -> dict:
             "pickup_date": driver.current_load_pickup_date,
             "delivery_date": driver.current_load_delivery_date,
         } if driver.current_load_id is not None else None,
-        "hos_remaining_hours": None,
+        "hos_remaining_hours": hos_remaining,
+        "distance_to_pickup": round(distance, 1),
         "load_progress_pct": progress_pct,
         "eta_label": format_eta_label(driver.current_load_delivery_date),
-        "fuel_pct": None,
+        "fuel_pct": 80 - (driver.driver_id % 40), # Mocked but stable
         "alerts": alerts,
         "performance": {
             "oor_miles": perf.oor_miles,
@@ -692,8 +825,32 @@ def score_candidate(load: LoadRecord, candidate: DispatchCandidate) -> dict:
     else:
         warnings.append("No performance record found")
 
+    # Proximity Penalty
+    # We need to calculate distance here too to apply the penalty
+    distance = 0.0
+    if driver.last_known_location in CITY_COORDS:
+        d_lat, d_lon = CITY_COORDS[driver.last_known_location]
+        distance = haversine(d_lat, d_lon, load.pickup_lat, load.pickup_lng)
+    
+    if distance > 250:
+        penalty = min(20, (distance - 250) / 25)
+        score -= penalty
+        warnings.append(f"Distance to pickup is high: {distance:.1f} mi")
+    else:
+        reasons.append(f"Proximity is good: {distance:.1f} mi")
+
+    # HOS Penalty
+    hos_base = 11.0 if driver.work_status == "AVAILABLE" else 5.5
+    hos_remaining = max(0.0, hos_base - ((driver.driver_id % 10) * 0.5))
+    
+    if hos_remaining < 8.5:
+        score -= 15
+        warnings.append(f"HOS remaining is low: {hos_remaining:.1f}h")
+    else:
+        reasons.append(f"HOS compliance is solid: {hos_remaining:.1f}h")
+
     score = max(0.0, min(100.0, round(score, 2)))
-    feasible = score >= 50
+    feasible = score >= 50 and hos_remaining >= 2.0 # Strict cutoff for feasibility
 
     return {
         "driver_id": driver.driver_id,
@@ -704,7 +861,7 @@ def score_candidate(load: LoadRecord, candidate: DispatchCandidate) -> dict:
         "feasible": feasible,
         "reasons": reasons,
         "warnings": warnings,
-        "driver_card": build_driver_card(candidate),
+        "driver_card": build_driver_card(candidate, load),
     }
 
 
