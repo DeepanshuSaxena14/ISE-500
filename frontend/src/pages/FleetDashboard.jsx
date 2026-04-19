@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { fleetService } from "../api";
 
 // ─── DATA ───────────────────────────────────────────────────────────────────
 
@@ -194,7 +195,8 @@ function StatCard({ label, value, sub, color }) {
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
 
 export default function FleetDashboard() {
-  const [drivers, setDrivers] = useState(DRIVERS_RAW);
+  const [drivers, setDrivers] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState(null);
   const [filter, setFilter] = useState("all");
   const [sortKey, setSortKey] = useState("alerts");
@@ -202,6 +204,49 @@ export default function FleetDashboard() {
   const [search, setSearch] = useState("");
   const [tick, setTick] = useState(0);
   const [lastUpdate, setLastUpdate] = useState(new Date());
+
+  const fetchDrivers = async () => {
+    try {
+      const data = await fleetService.getDrivers();
+      // Map backend shape to frontend shape
+      const mapped = data.map(d => ({
+        id: d.driver_id,
+        name: d.name || 'Unknown Driver',
+        avatar: d.name ? d.name.split(' ').map(n => n[0]).join('') : '??',
+        truckId: d.vehicle_no || 'N/A',
+        location: d.location_label || 'Unknown',
+        status: d.status_label || 'Offline',
+        hosRemaining: d.performance ? (d.performance.schedule_time / 60) : 10.0,
+        hosDriven: d.performance ? (d.performance.actual_time / 60) : 1.0,
+        load: d.current_load ? {
+          id: d.current_load.load_show_id || d.current_load.load_id,
+          origin: d.current_load.origin,
+          dest: d.current_load.destination,
+          progress: d.load_progress_pct || 0
+        } : null,
+        eta: d.eta_label || '—',
+        etaStatus: d.load_progress_pct > 90 ? 'on_time' : 'pending',
+        speed: d.status_label === 'Driving' ? 65 : 0,
+        fuelLevel: d.fuel_pct || 75,
+        odometer: 250000,
+        onTimeRate: 95,
+        rating: 4.5,
+        alerts: (d.alerts || []).map(a => ({
+          type: a.severity === 'high' ? 'critical' : a.severity === 'medium' ? 'warning' : 'info',
+          msg: a.text
+        }))
+      }));
+      setDrivers(mapped);
+    } catch (error) {
+      console.error("Failed to fetch drivers:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDrivers();
+  }, []);
 
   // Simulate live GPS + speed updates every 8s
   useEffect(() => {

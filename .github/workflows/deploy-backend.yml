@@ -35,8 +35,8 @@ jobs:
           cd backend
           railway up \
             --service dispatchiq-api \
+            --config railway-api.json \
             --detach
-        # Railway picks up backend/railway-api.json for start command
 
       - name: Confirm
         run: echo "Fleet API deployed at $(date -u)"
@@ -59,6 +59,7 @@ jobs:
           cd backend
           railway up \
             --service dispatchiq-chat \
+            --config railway-chat.json \
             --detach
 
       - name: Confirm

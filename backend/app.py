@@ -1,17 +1,51 @@
 from __future__ import annotations
 
 import os
+import math
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import List, Optional
 from pathlib import Path
 from typing import List, Optional
 from uuid import uuid4
 
 from dotenv import load_dotenv
+from dotenv import load_dotenv
 from flask import Flask, jsonify, request
+from flask_cors import CORS
 from supabase import Client, create_client
 
+from ai.tools.llm import generate_text
+
 app = Flask(__name__)
+CORS(app)
+
+# ------------------------------------------------------------
+# Geospatial helpers
+# ------------------------------------------------------------
+
+CITY_COORDS = {
+    "Phoenix, AZ": (33.4484, -112.0740),
+    "Los Angeles, CA": (34.0522, -118.2437),
+    "Dallas, TX": (32.7767, -96.7970),
+    "Seattle, WA": (47.6062, -122.3321),
+    "Chicago, IL": (41.8781, -87.6298),
+    "Atlanta, GA": (33.7490, -84.3880),
+    "New York, NY": (40.7128, -74.0060),
+    "Miami, FL": (25.7617, -80.1918),
+    "Denver, CO": (39.7392, -104.9903),
+    "Salt Lake City, UT": (40.7608, -111.8910),
+}
+
+def haversine(lat1, lon1, lat2, lon2):
+    R = 3958.8 # Earth radius in miles
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (math.sin(dlat / 2) ** 2 +
+         math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2)
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
 
 # ------------------------------------------------------------
 # .env diagnostics
@@ -99,6 +133,8 @@ class DriverProfile:
     current_load_delivery_date: Optional[int]
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 
 @dataclass
@@ -117,6 +153,8 @@ class VehicleRecord:
     created_date: Optional[str]
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 
 @dataclass
@@ -127,6 +165,8 @@ class DriverPerformance:
     actual_miles: float
     schedule_time: int
     actual_time: int
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
@@ -159,6 +199,11 @@ def format_eta_label(delivery_date_ms: Optional[int]) -> Optional[str]:
 
     now = datetime.now(timezone.utc)
 
+    if dt.date() == now.date():
+        return f"Today {dt.strftime('%H:%M')}"
+    if (dt.date() - now.date()).days == 1:
+        return f"Tomorrow {dt.strftime('%H:%M')}"
+    return dt.strftime("%Y-%m-%d %H:%M UTC")
     if dt.date() == now.date():
         return f"Today {dt.strftime('%H:%M')}"
     if (dt.date() - now.date()).days == 1:
@@ -241,8 +286,16 @@ def build_alerts(
                 "severity": "medium",
                 "text": f"Actual time exceeds schedule by {(time_ratio - 1) * 100:.1f}%"
             })
+            alerts.append({
+                "severity": "medium",
+                "text": f"Actual time exceeds schedule by {(time_ratio - 1) * 100:.1f}%"
+            })
 
         if mile_ratio > 1.10:
+            alerts.append({
+                "severity": "medium",
+                "text": f"Actual miles exceed scheduled miles by {(mile_ratio - 1) * 100:.1f}%"
+            })
             alerts.append({
                 "severity": "medium",
                 "text": f"Actual miles exceed scheduled miles by {(mile_ratio - 1) * 100:.1f}%"
@@ -309,6 +362,25 @@ def normalize_vehicle(item: dict) -> VehicleRecord:
         created_date=item.get("created_date"),
     )
 
+
+def extract_vehicle_driver_assignments(item: dict) -> list[dict]:
+    assignments = item.get("assignments_drivers", {}) or {}
+    driver_ids = assignments.get("driver_ids", []) or []
+
+    if not driver_ids:
+        driver_ids = [
+            d.get("assign_driver_id")
+            for d in assignments.get("assign_driver_info", [])
+            if d.get("assign_driver_id") is not None
+        ]
+
+    return [
+        {
+            "vehicle_id": int(item["vehicle_id"]),
+            "driver_id": int(driver_id),
+        }
+        for driver_id in driver_ids
+    ]
 
 def extract_vehicle_driver_assignments(item: dict) -> list[dict]:
     assignments = item.get("assignments_drivers", {}) or {}
@@ -431,10 +503,184 @@ def build_dispatch_candidates() -> List[DispatchCandidate]:
 
 
 # ============================================================
-# Frontend-ready driver card shape
+# Supabase fetch helpers
 # ============================================================
 
-def build_driver_card(candidate: DispatchCandidate) -> dict:
+def fetch_all_drivers() -> list[DriverProfile]:
+    res = supabase.table("drivers").select("*").execute()
+    return [DriverProfile(**row) for row in (res.data or [])]
+
+
+def fetch_all_vehicles() -> list[VehicleRecord]:
+    res = supabase.table("vehicles").select("*").execute()
+    return [VehicleRecord(**row) for row in (res.data or [])]
+
+
+def fetch_all_performance() -> dict[int, DriverPerformance]:
+    res = supabase.table("driver_performance").select("*").execute()
+    perf_map: dict[int, DriverPerformance] = {}
+
+    for row in (res.data or []):
+        perf = DriverPerformance(
+            driver_id=int(row["driver_id"]),
+            oor_miles=float(row["oor_miles"]),
+            schedule_miles=float(row["schedule_miles"]),
+            actual_miles=float(row["actual_miles"]),
+            schedule_time=int(row["schedule_time"]),
+            actual_time=int(row["actual_time"]),
+            created_at=row.get("created_at"),
+            updated_at=row.get("updated_at"),
+        )
+        perf_map[perf.driver_id] = perf
+
+    return perf_map
+
+
+def fetch_vehicle_assignments() -> dict[int, VehicleRecord]:
+    assignments_res = supabase.table("vehicle_driver_assignments").select("vehicle_id,driver_id").execute()
+    vehicles = fetch_all_vehicles()
+    vehicle_by_id = {vehicle.vehicle_id: vehicle for vehicle in vehicles}
+
+    vehicle_by_driver: dict[int, VehicleRecord] = {}
+    for row in (assignments_res.data or []):
+        vehicle = vehicle_by_id.get(int(row["vehicle_id"]))
+        if vehicle:
+            vehicle_by_driver[int(row["driver_id"])] = vehicle
+
+    return vehicle_by_driver
+
+
+def fetch_load(load_id: str) -> Optional[LoadRecord]:
+    res = supabase.table("loads").select("*").eq("id", load_id).limit(1).execute()
+    if not res.data:
+        return None
+
+    row = res.data[0]
+    return LoadRecord(
+        id=row["id"],
+        pickup_name=row["pickup_name"],
+        pickup_address=row["pickup_address"],
+        pickup_lat=float(row["pickup_lat"]),
+        pickup_lng=float(row["pickup_lng"]),
+        dropoff_name=row["dropoff_name"],
+        dropoff_address=row["dropoff_address"],
+        dropoff_lat=float(row["dropoff_lat"]),
+        dropoff_lng=float(row["dropoff_lng"]),
+        pickup_time=row["pickup_time"],
+        dropoff_time=row["dropoff_time"],
+        required_trailer_type=row.get("required_trailer_type"),
+        required_vehicle_type=row.get("required_vehicle_type"),
+        created_at=row.get("created_at"),
+    )
+
+
+def build_dispatch_candidates() -> List[DispatchCandidate]:
+    drivers = fetch_all_drivers()
+    vehicle_by_driver = fetch_vehicle_assignments()
+    performance_by_driver = fetch_all_performance()
+
+    candidates: List[DispatchCandidate] = []
+    for driver in drivers:
+        candidates.append(
+            DispatchCandidate(
+                driver=driver,
+                vehicle=vehicle_by_driver.get(driver.driver_id),
+                performance=performance_by_driver.get(driver.driver_id),
+            )
+        )
+    return candidates
+
+
+# ============================================================
+# Supabase fetch helpers
+# ============================================================
+
+def fetch_all_drivers() -> list[DriverProfile]:
+    res = supabase.table("drivers").select("*").execute()
+    return [DriverProfile(**row) for row in (res.data or [])]
+
+
+def fetch_all_vehicles() -> list[VehicleRecord]:
+    res = supabase.table("vehicles").select("*").execute()
+    return [VehicleRecord(**row) for row in (res.data or [])]
+
+
+def fetch_all_performance() -> dict[int, DriverPerformance]:
+    res = supabase.table("driver_performance").select("*").execute()
+    perf_map: dict[int, DriverPerformance] = {}
+
+    for row in (res.data or []):
+        perf = DriverPerformance(
+            driver_id=int(row["driver_id"]),
+            oor_miles=float(row["oor_miles"]),
+            schedule_miles=float(row["schedule_miles"]),
+            actual_miles=float(row["actual_miles"]),
+            schedule_time=int(row["schedule_time"]),
+            actual_time=int(row["actual_time"]),
+            created_at=row.get("created_at"),
+            updated_at=row.get("updated_at"),
+        )
+        perf_map[perf.driver_id] = perf
+
+    return perf_map
+
+
+def fetch_vehicle_assignments() -> dict[int, VehicleRecord]:
+    assignments_res = supabase.table("vehicle_driver_assignments").select("vehicle_id,driver_id").execute()
+    vehicles = fetch_all_vehicles()
+    vehicle_by_id = {vehicle.vehicle_id: vehicle for vehicle in vehicles}
+
+    vehicle_by_driver: dict[int, VehicleRecord] = {}
+    for row in (assignments_res.data or []):
+        vehicle = vehicle_by_id.get(int(row["vehicle_id"]))
+        if vehicle:
+            vehicle_by_driver[int(row["driver_id"])] = vehicle
+
+    return vehicle_by_driver
+
+
+def fetch_load(load_id: str) -> Optional[LoadRecord]:
+    res = supabase.table("loads").select("*").eq("id", load_id).limit(1).execute()
+    if not res.data:
+        return None
+
+    row = res.data[0]
+    return LoadRecord(
+        id=row["id"],
+        pickup_name=row["pickup_name"],
+        pickup_address=row["pickup_address"],
+        pickup_lat=float(row["pickup_lat"]),
+        pickup_lng=float(row["pickup_lng"]),
+        dropoff_name=row["dropoff_name"],
+        dropoff_address=row["dropoff_address"],
+        dropoff_lat=float(row["dropoff_lat"]),
+        dropoff_lng=float(row["dropoff_lng"]),
+        pickup_time=row["pickup_time"],
+        dropoff_time=row["dropoff_time"],
+        required_trailer_type=row.get("required_trailer_type"),
+        required_vehicle_type=row.get("required_vehicle_type"),
+        created_at=row.get("created_at"),
+    )
+
+
+def build_dispatch_candidates() -> List[DispatchCandidate]:
+    drivers = fetch_all_drivers()
+    vehicle_by_driver = fetch_vehicle_assignments()
+    performance_by_driver = fetch_all_performance()
+
+    candidates: List[DispatchCandidate] = []
+    for driver in drivers:
+        candidates.append(
+            DispatchCandidate(
+                driver=driver,
+                vehicle=vehicle_by_driver.get(driver.driver_id),
+                performance=performance_by_driver.get(driver.driver_id),
+            )
+        )
+    return candidates
+
+
+def build_driver_card(candidate: DispatchCandidate, load: Optional[LoadRecord] = None) -> dict:
     driver = candidate.driver
     vehicle = candidate.vehicle
     perf = candidate.performance
@@ -445,6 +691,30 @@ def build_driver_card(candidate: DispatchCandidate) -> dict:
     )
 
     alerts = build_alerts(driver, vehicle, perf)
+
+    # Calculate Distance/Proximity
+    distance = 0.0
+    if load and driver.last_known_location in CITY_COORDS:
+        d_lat, d_lon = CITY_COORDS[driver.last_known_location]
+        distance = haversine(d_lat, d_lon, load.pickup_lat, load.pickup_lng)
+
+    # Calculate Mock HOS (Hours of Service)
+    # Available = full 11h, In Transit = partial
+    hos_base = 11.0 if driver.work_status == "AVAILABLE" else 5.5
+    # Deterministic drift based on ID
+    hos_remaining = max(0.0, hos_base - ((driver.driver_id % 10) * 0.5))
+
+    # Calculate Distance/Proximity
+    distance = 0.0
+    if load and driver.last_known_location in CITY_COORDS:
+        d_lat, d_lon = CITY_COORDS[driver.last_known_location]
+        distance = haversine(d_lat, d_lon, load.pickup_lat, load.pickup_lng)
+
+    # Calculate Mock HOS (Hours of Service)
+    # Available = full 11h, In Transit = partial
+    hos_base = 11.0 if driver.work_status == "AVAILABLE" else 5.5
+    # Deterministic drift based on ID
+    hos_remaining = max(0.0, hos_base - ((driver.driver_id % 10) * 0.5))
 
     return {
         "driver_id": driver.driver_id,
@@ -465,10 +735,11 @@ def build_driver_card(candidate: DispatchCandidate) -> dict:
             "pickup_date": driver.current_load_pickup_date,
             "delivery_date": driver.current_load_delivery_date,
         } if driver.current_load_id is not None else None,
-        "hos_remaining_hours": None,
+        "hos_remaining_hours": hos_remaining,
+        "distance_to_pickup": round(distance, 1),
         "load_progress_pct": progress_pct,
         "eta_label": format_eta_label(driver.current_load_delivery_date),
-        "fuel_pct": None,
+        "fuel_pct": 80 - (driver.driver_id % 40), # Mocked but stable
         "alerts": alerts,
         "performance": {
             "oor_miles": perf.oor_miles,
@@ -554,8 +825,32 @@ def score_candidate(load: LoadRecord, candidate: DispatchCandidate) -> dict:
     else:
         warnings.append("No performance record found")
 
+    # Proximity Penalty
+    # We need to calculate distance here too to apply the penalty
+    distance = 0.0
+    if driver.last_known_location in CITY_COORDS:
+        d_lat, d_lon = CITY_COORDS[driver.last_known_location]
+        distance = haversine(d_lat, d_lon, load.pickup_lat, load.pickup_lng)
+    
+    if distance > 250:
+        penalty = min(20, (distance - 250) / 25)
+        score -= penalty
+        warnings.append(f"Distance to pickup is high: {distance:.1f} mi")
+    else:
+        reasons.append(f"Proximity is good: {distance:.1f} mi")
+
+    # HOS Penalty
+    hos_base = 11.0 if driver.work_status == "AVAILABLE" else 5.5
+    hos_remaining = max(0.0, hos_base - ((driver.driver_id % 10) * 0.5))
+    
+    if hos_remaining < 8.5:
+        score -= 15
+        warnings.append(f"HOS remaining is low: {hos_remaining:.1f}h")
+    else:
+        reasons.append(f"HOS compliance is solid: {hos_remaining:.1f}h")
+
     score = max(0.0, min(100.0, round(score, 2)))
-    feasible = score >= 50
+    feasible = score >= 50 and hos_remaining >= 2.0 # Strict cutoff for feasibility
 
     return {
         "driver_id": driver.driver_id,
@@ -566,7 +861,7 @@ def score_candidate(load: LoadRecord, candidate: DispatchCandidate) -> dict:
         "feasible": feasible,
         "reasons": reasons,
         "warnings": warnings,
-        "driver_card": build_driver_card(candidate),
+        "driver_card": build_driver_card(candidate, load),
     }
 
 
@@ -592,8 +887,6 @@ def health_db():
             "status": "error",
             "message": str(e),
         }), 500
-
-
 @app.post("/ingest/drivers")
 def ingest_drivers():
     payload = request.get_json(force=True)
@@ -608,9 +901,19 @@ def ingest_drivers():
     if rows:
         supabase.table("drivers").upsert(rows).execute()
         supabase.table("ingest_driver_batches").insert({"payload": payload}).execute()
+    rows = [asdict(normalize_driver(item)) for item in items]
+
+    for row in rows:
+        row.pop("created_at", None)
+        row.pop("updated_at", None)
+
+    if rows:
+        supabase.table("drivers").upsert(rows).execute()
+        supabase.table("ingest_driver_batches").insert({"payload": payload}).execute()
 
     return jsonify({
         "success": True,
+        "ingested_count": len(rows),
         "ingested_count": len(rows),
     })
 
@@ -619,6 +922,9 @@ def ingest_drivers():
 def ingest_vehicles():
     payload = request.get_json(force=True)
     items = payload.get("data", [])
+
+    vehicle_rows = []
+    assignment_rows = []
 
     vehicle_rows = []
     assignment_rows = []
@@ -644,9 +950,31 @@ def ingest_vehicles():
             assignment_rows,
             on_conflict="vehicle_id,driver_id"
         ).execute()
+        vehicle_row = asdict(normalize_vehicle(item))
+        vehicle_row.pop("created_at", None)
+        vehicle_row.pop("updated_at", None)
+        vehicle_rows.append(vehicle_row)
+
+        assignment_rows.extend(extract_vehicle_driver_assignments(item))
+
+    if vehicle_rows:
+        supabase.table("vehicles").upsert(vehicle_rows).execute()
+        supabase.table("ingest_vehicle_batches").insert({"payload": payload}).execute()
+
+    affected_vehicle_ids = list({row["vehicle_id"] for row in assignment_rows})
+    if affected_vehicle_ids:
+        supabase.table("vehicle_driver_assignments").delete().in_("vehicle_id", affected_vehicle_ids).execute()
+
+    if assignment_rows:
+        supabase.table("vehicle_driver_assignments").upsert(
+            assignment_rows,
+            on_conflict="vehicle_id,driver_id"
+        ).execute()
 
     return jsonify({
         "success": True,
+        "ingested_count": len(vehicle_rows),
+        "assignment_count": len(assignment_rows),
         "ingested_count": len(vehicle_rows),
         "assignment_count": len(assignment_rows),
     })
@@ -666,15 +994,26 @@ def ingest_driver_performance():
     if rows:
         supabase.table("driver_performance").upsert(rows).execute()
         supabase.table("ingest_driver_performance_batches").insert({"payload": payload}).execute()
+    rows = [asdict(normalize_performance(item)) for item in items]
+
+    for row in rows:
+        row.pop("created_at", None)
+        row.pop("updated_at", None)
+
+    if rows:
+        supabase.table("driver_performance").upsert(rows).execute()
+        supabase.table("ingest_driver_performance_batches").insert({"payload": payload}).execute()
 
     return jsonify({
         "success": True,
+        "ingested_count": len(rows),
         "ingested_count": len(rows),
     })
 
 
 @app.get("/debug/drivers")
 def debug_drivers():
+    return jsonify(supabase.table("drivers").select("*").execute().data)
     return jsonify(supabase.table("drivers").select("*").execute().data)
 
 
@@ -745,16 +1084,37 @@ def create_load():
 
     result = supabase.table("loads").insert(row).execute()
     return jsonify(result.data[0]), 201
+    row = {
+        "id": load_id,
+        "pickup_name": payload["pickup_name"],
+        "pickup_address": payload["pickup_address"],
+        "pickup_lat": float(payload["pickup_lat"]),
+        "pickup_lng": float(payload["pickup_lng"]),
+        "dropoff_name": payload["dropoff_name"],
+        "dropoff_address": payload["dropoff_address"],
+        "dropoff_lat": float(payload["dropoff_lat"]),
+        "dropoff_lng": float(payload["dropoff_lng"]),
+        "pickup_time": payload["pickup_time"],
+        "dropoff_time": payload["dropoff_time"],
+        "required_trailer_type": payload.get("required_trailer_type"),
+        "required_vehicle_type": payload.get("required_vehicle_type", "TRUCK"),
+    }
+
+    result = supabase.table("loads").insert(row).execute()
+    return jsonify(result.data[0]), 201
 
 
 @app.get("/loads")
 def list_loads():
     res = supabase.table("loads").select("*").execute()
     return jsonify(res.data)
+    res = supabase.table("loads").select("*").execute()
+    return jsonify(res.data)
 
 
 @app.get("/loads/<load_id>")
 def get_load(load_id: str):
+    load = fetch_load(load_id)
     load = fetch_load(load_id)
     if not load:
         return jsonify({"error": "Load not found"}), 404
@@ -763,6 +1123,7 @@ def get_load(load_id: str):
 
 @app.get("/loads/<load_id>/recommendations")
 def get_load_recommendations(load_id: str):
+    load = fetch_load(load_id)
     load = fetch_load(load_id)
     if not load:
         return jsonify({"error": "Load not found"}), 404
@@ -777,6 +1138,7 @@ def get_load_recommendations(load_id: str):
 @app.get("/loads/<load_id>/recommendation/top")
 def get_top_load_recommendation(load_id: str):
     load = fetch_load(load_id)
+    load = fetch_load(load_id)
     if not load:
         return jsonify({"error": "Load not found"}), 404
 
@@ -788,6 +1150,55 @@ def get_top_load_recommendation(load_id: str):
         return jsonify({"error": "No candidates found"}), 404
 
     return jsonify(ranked[0])
+
+
+@app.get("/loads/<load_id>/recommendation/explain")
+def explain_load_recommendation(load_id: str):
+    load = fetch_load(load_id)
+    if not load:
+        return jsonify({"error": "Load not found"}), 404
+
+    candidates = build_dispatch_candidates()
+    ranked = [score_candidate(load, candidate) for candidate in candidates]
+    ranked.sort(key=lambda x: (x["feasible"], x["score"]), reverse=True)
+
+    if not ranked:
+        return jsonify({"error": "No candidates found"}), 404
+
+    # Get the top a few candidates to provide context for the AI
+    top_candidates = ranked[:3]
+    top_driver = top_candidates[0]
+
+    # Construction of prompt
+    prompt_lines = [
+        f"We need to recommend the best driver for load #{load_id} going from '{load.pickup_address}' to '{load.dropoff_address}'.",
+        "Our deterministic algorithm has ranked the feasible drivers based on specific weights (e.g., active vehicle, current status in-transit vs off-duty, performance mileage out-of-route, and vehicle matching constraints).",
+        "Please provide a 3-4 sentence professional explanation for dispatchers. Focus on how the weights split, the trade-offs, and why the top driver is fundamentally better. For instance, explain why sticking with an in-transit driver facing slight traffic/delay is better than picking an off-duty operator or switching out an assigned vehicle."
+    ]
+
+    for idx, c in enumerate(top_candidates):
+        rank = idx + 1
+        d = c["driver_card"]
+        prompt_lines.append(
+            f"Rank {rank}: {c['driver_name']} (Score: {c['score']}). "
+            f"Status: {d.get('status_label')}. "
+            f"ETA: {d.get('eta_label')}. "
+            f"Reasons for score: {', '.join(c['reasons'])}. "
+            f"Warnings/Penalties: {', '.join(c['warnings'])}."
+        )
+
+    prompt = "\\n".join(prompt_lines)
+    
+    try:
+        rationale = generate_text(prompt)
+    except Exception as e:
+        rationale = f"AI Generation failed: {str(e)}"
+
+    return jsonify({
+        "top_candidate": top_driver,
+        "ai_rationale": rationale,
+        "runner_ups": top_candidates[1:]
+    })
 
 
 if __name__ == "__main__":

@@ -37,20 +37,21 @@ def main():
     r = requests.get(f"{BASE_URL}/driver-cards")
     show("driver cards", r)
 
-    r = requests.post(f"{BASE_URL}/loads", json=MOCK_LOAD_REQUESTS[0])
-    show("create load", r)
+    for load_req in MOCK_LOAD_REQUESTS:
+        r = requests.post(f"{BASE_URL}/loads", json=load_req)
+        show("create load", r)
 
-    if r.ok:
-        load_id = r.json()["id"]
+        if r.ok:
+            load_id = r.json()["id"]
 
-        r = requests.get(f"{BASE_URL}/loads/{load_id}")
-        show("get load", r)
+            r = requests.get(f"{BASE_URL}/loads/{load_id}")
+            show("get load", r)
 
-        r = requests.get(f"{BASE_URL}/loads/{load_id}/recommendations")
-        show("recommendations", r)
+            r = requests.get(f"{BASE_URL}/loads/{load_id}/recommendations")
+            show("recommendations", r)
 
-        r = requests.get(f"{BASE_URL}/loads/{load_id}/recommendation/top")
-        show("top recommendation", r)
+            r = requests.get(f"{BASE_URL}/loads/{load_id}/recommendation/top")
+            show("top recommendation", r)
 
 
 if __name__ == "__main__":
