@@ -238,12 +238,57 @@ export default function AIChatAssistant() {
   const [loading, setLoading] = useState(false);
   const [showSuggested, setShowSuggested] = useState(true);
   const [conversationHistory, setConversationHistory] = useState([]);
+  const [isAudioLoading, setIsAudioLoading] = useState(null); // stores message index or 'briefing' etc
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
+
+  // ─── AUDIO UTILITY ──────────────────────────────────────────────────────
+  const playAudioFromText = async (text, id = 'manual') => {
+    if (!text) return;
+    setIsAudioLoading(id);
+    try {
+      const resp = await fetch("http://localhost:5001/api/voice/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text })
+      });
+      if (!resp.ok) throw new Error("TTS failed");
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.onended = () => setIsAudioLoading(null);
+      await audio.play();
+    } catch (err) {
+      console.error("Audio Playback Error:", err);
+      setIsAudioLoading(null);
+    }
+  };
+
+  const handleBriefing = async (type) => {
+    const prompt = type === 'fleet' 
+      ? "Give me a very concise 2-sentence fleet status overview for an operational voice briefing."
+      : "Summarize the top 2 most urgent critical alerts in 2 short sentences for a voice briefing.";
+    
+    setIsAudioLoading(type);
+    try {
+      const resp = await fetch("http://localhost:5001/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: prompt, history: [] })
+      });
+      const data = await resp.json();
+      if (data.answer) {
+        await playAudioFromText(data.answer, type);
+      }
+    } catch (err) {
+      console.error("Briefing Error:", err);
+      setIsAudioLoading(null);
+    }
+  };
 
   // Welcome message on mount
   useEffect(() => {
@@ -342,17 +387,59 @@ export default function AIChatAssistant() {
 
       <div className="flex-1 flex flex-col min-h-0 bg-white/[0.02] border border-white/[0.05] rounded-2xl p-6 overflow-hidden relative">
         {/* ── MESSAGES ── */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "16px 0", display: "flex", flexDirection: "column", gap: 12 }}>
+        
+        {/* Voice Dashboard */}
+        <div style={{ background: "rgba(29,158,117,.03)", border: "0.5px solid rgba(29,158,117,.15)", borderRadius: 12, padding: "14px", marginBottom: 20, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ width: 28, height: 28, borderRadius: "50%", background: "#1d9e75", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>🎙️</div>
+            <div>
+              <h4 style={{ margin: 0, fontSize: 12, color: "#f1f5f9" }}>Voice Copilot</h4>
+              <p style={{ margin: 0, fontSize: 9, color: "rgba(255,255,255,.3)" }}>Hands-busy briefings</p>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button 
+              onClick={() => handleBriefing('fleet')}
+              disabled={isAudioLoading !== null}
+              style={{ background: "rgba(255,255,255,.05)", border: "0.5px solid rgba(255,255,255,.1)", borderRadius: 6, color: "#f1f5f9", fontSize: 9, fontWeight: 600, padding: "5px 10px", cursor: "pointer", transition: "all 0.2s", display: "flex", alignItems: "center", gap: 6 }}
+              onMouseEnter={e => e.target.style.background = "rgba(255,255,255,.1)"}
+              onMouseLeave={e => e.target.style.background = "rgba(255,255,255,.05)"}
+            >
+              {isAudioLoading === 'fleet' ? "⌛" : "▶"} Play Fleet Briefing
+            </button>
+            <button 
+              onClick={() => handleBriefing('alerts')}
+              disabled={isAudioLoading !== null}
+              style={{ background: "rgba(248,113,113,.08)", border: "0.5px solid rgba(248,113,113,.15)", borderRadius: 6, color: "#f87171", fontSize: 9, fontWeight: 600, padding: "5px 10px", cursor: "pointer", transition: "all 0.2s", display: "flex", alignItems: "center", gap: 6 }}
+              onMouseEnter={e => e.target.style.background = "rgba(248,113,113,.12)"}
+              onMouseLeave={e => e.target.style.background = "rgba(248,113,113,.08)"}
+            >
+              {isAudioLoading === 'alerts' ? "⌛" : "⚠"} Play Critical Alerts
+            </button>
+          </div>
+        </div>
+
+        <div style={{ flex: 1, overflowY: "auto", padding: "10px 0", display: "flex", flexDirection: "column", gap: 12 }}>
 
           {messages.map((msg) => (
             <div key={msg.id} className="msg-in" style={{ display: "flex", flexDirection: "column", alignItems: msg.role === "user" ? "flex-end" : "flex-start", gap: 4 }}>
               {/* Sender row */}
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                {msg.role === "ai" && (
-                  <div style={{ width: 22, height: 22, borderRadius: 5, background: "rgba(29,158,117,.15)", border: "0.5px solid rgba(29,158,117,.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8, fontWeight: 700, color: "#34d399", letterSpacing: "0.05em" }}>AI</div>
-                )}
-                <span style={{ fontSize: 9, color: "rgba(255,255,255,.25)" }}>{msg.role === "ai" ? "DispatchIQ" : "You"} · {msg.time}</span>
-                {msg.role === "user" && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    {msg.role === "ai" && (
+                      <div style={{ width: 22, height: 22, borderRadius: 5, background: "rgba(29,158,117,.15)", border: "0.5px solid rgba(29,158,117,.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8, fontWeight: 700, color: "#34d399", letterSpacing: "0.05em" }}>AI</div>
+                    )}
+                    <span style={{ fontSize: 9, color: "rgba(255,255,255,.25)" }}>{msg.role === "ai" ? "DispatchIQ" : "You"} · {msg.time}</span>
+                    {msg.role === "ai" && (
+                      <button 
+                        onClick={() => playAudioFromText(msg.text || (msg.parsed && msg.parsed.summary), msg.id)}
+                        disabled={isAudioLoading !== null}
+                        style={{ background: "none", border: "none", cursor: "pointer", color: isAudioLoading === msg.id ? "#34d399" : "rgba(255,255,255,.15)", fontSize: 11, padding: 0, marginLeft: 2, display: "flex", alignItems: "center", transition: "color 0.2s" }}
+                        title="Speak response"
+                      >
+                        {isAudioLoading === msg.id ? "⌛" : "🔊"}
+                      </button>
+                    )}
+                    {msg.role === "user" && (
                   <div style={{ width: 22, height: 22, borderRadius: 5, background: "rgba(255,255,255,.07)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8, fontWeight: 700, color: "rgba(255,255,255,.5)" }}>ME</div>
                 )}
               </div>

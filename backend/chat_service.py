@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 import os
 import sys
@@ -11,6 +11,7 @@ load_dotenv(find_dotenv())
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from ai.service import process_dispatch_query
+from ai.tools.tts import synthesize_speech
 
 app = Flask(__name__)
 # Enable CORS for all routes
@@ -29,6 +30,23 @@ def chat():
         # Resolve the query using the LLM-driven dispatch service
         response = process_dispatch_query(question, context={"history": history})
         return jsonify(response)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/voice/tts', methods=['POST'])
+def tts():
+    data = request.get_json() or {}
+    text = data.get('text', '')
+    
+    if not text:
+        return jsonify({"error": "No text provided"}), 400
+        
+    try:
+        audio_content = synthesize_speech(text)
+        if not audio_content:
+            return jsonify({"error": "Failed to synthesize speech"}), 500
+            
+        return Response(audio_content, mimetype="audio/mpeg")
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
