@@ -1,33 +1,61 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from pathlib import Path
+from typing import List, Optional
 from uuid import uuid4
 
+from dotenv import load_dotenv
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-import os
-import sys
+from supabase import Client, create_client
 
-# Add the current directory to sys.path so we can import 'ai'
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-from ai.service import process_dispatch_query
+from ai.tools.llm import generate_text
 
 app = Flask(__name__)
-# Enable CORS for all routes to allow connection from frontend (port 5173)
 CORS(app)
 
+# ------------------------------------------------------------
+# .env diagnostics
+# ------------------------------------------------------------
+ENV_PATH = Path("/app/.env")
+cwd = Path.cwd()
 
-# ============================================================
-# In-memory stores
-# ============================================================
+print("[startup] Current working directory:", cwd)
+print("[startup] Expected .env path:", ENV_PATH)
+print("[startup] .env exists:", ENV_PATH.exists())
 
-DRIVERS: Dict[int, "DriverProfile"] = {}
-VEHICLES: Dict[int, "VehicleRecord"] = {}
-PERFORMANCE: Dict[int, "DriverPerformance"] = {}
-LOADS: Dict[str, "LoadRecord"] = {}
+if ENV_PATH.exists():
+    print("[startup] .env file found, loading it now")
+    load_dotenv(dotenv_path=ENV_PATH)
+else:
+    print("[startup] .env file not found at /app/.env, trying default load_dotenv()")
+    load_dotenv()
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+PORT = int(os.getenv("PORT", "8000"))
+
+print("[startup] SUPABASE_URL present:", bool(SUPABASE_URL))
+print("[startup] SUPABASE_SERVICE_ROLE_KEY present:", bool(SUPABASE_SERVICE_ROLE_KEY))
+print("[startup] PORT:", PORT)
+
+if SUPABASE_URL:
+    print("[startup] SUPABASE_URL preview:", SUPABASE_URL[:40] + "...")
+else:
+    print("[startup] SUPABASE_URL is missing")
+
+if SUPABASE_SERVICE_ROLE_KEY:
+    print("[startup] SUPABASE_SERVICE_ROLE_KEY preview:", SUPABASE_SERVICE_ROLE_KEY[:8] + "..." + SUPABASE_SERVICE_ROLE_KEY[-4:])
+else:
+    print("[startup] SUPABASE_SERVICE_ROLE_KEY is missing")
+
+if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+    raise RuntimeError("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env")
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 
 # ============================================================
@@ -73,6 +101,8 @@ class DriverProfile:
     current_load_destination: Optional[str]
     current_load_pickup_date: Optional[int]
     current_load_delivery_date: Optional[int]
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 
 @dataclass
@@ -89,7 +119,8 @@ class VehicleRecord:
     vehicle_make: Optional[str]
     vehicle_model: Optional[str]
     created_date: Optional[str]
-    assigned_driver_ids: List[int]
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 
 @dataclass
@@ -100,6 +131,8 @@ class DriverPerformance:
     actual_miles: float
     schedule_time: int
     actual_time: int
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 
 @dataclass
@@ -117,12 +150,6 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
-    if not value:
-        return None
-    return datetime.fromisoformat(value.replace("Z", "+00:00"))
-
-
 def epoch_ms_to_datetime(value: Optional[int]) -> Optional[datetime]:
     if value is None:
         return None
@@ -135,13 +162,12 @@ def format_eta_label(delivery_date_ms: Optional[int]) -> Optional[str]:
         return None
 
     now = datetime.now(timezone.utc)
-    local_dt = dt
 
-    if local_dt.date() == now.date():
-        return f"Today {local_dt.strftime('%H:%M')}"
-    if (local_dt.date() - now.date()).days == 1:
-        return f"Tomorrow {local_dt.strftime('%H:%M')}"
-    return local_dt.strftime("%Y-%m-%d %H:%M UTC")
+    if dt.date() == now.date():
+        return f"Today {dt.strftime('%H:%M')}"
+    if (dt.date() - now.date()).days == 1:
+        return f"Tomorrow {dt.strftime('%H:%M')}"
+    return dt.strftime("%Y-%m-%d %H:%M UTC")
 
 
 def estimate_progress_pct(pickup_ms: Optional[int], delivery_ms: Optional[int]) -> Optional[int]:
@@ -192,21 +218,18 @@ def build_alerts(
 ) -> List[dict]:
     alerts: List[dict] = []
 
-    # Vehicle alerts
     if vehicle is None:
         alerts.append({"severity": "high", "text": "No assigned vehicle found"})
     else:
         if vehicle.vehicle_status != "ACTIVE":
             alerts.append({"severity": "high", "text": f"Vehicle status is {vehicle.vehicle_status}"})
 
-    # Driver operational alerts
     if driver.current_load_id is not None:
         alerts.append({"severity": "low", "text": "Driver currently assigned to an active load"})
 
     if driver.work_status in {"OFF_DUTY", "INACTIVE"}:
         alerts.append({"severity": "high", "text": f"Driver work status is {driver.work_status}"})
 
-    # Performance alerts
     if perf is not None:
         oor_ratio = safe_ratio(perf.oor_miles, perf.schedule_miles)
         time_ratio = safe_ratio(float(perf.actual_time), float(perf.schedule_time))
@@ -218,37 +241,20 @@ def build_alerts(
             alerts.append({"severity": "medium", "text": f"Moderate out-of-route ratio: {oor_ratio:.1%}"})
 
         if time_ratio > 1.15:
-            alerts.append({"severity": "medium", "text": f"Actual time exceeds schedule by {(time_ratio - 1) * 100:.1f}%"})
+            alerts.append({
+                "severity": "medium",
+                "text": f"Actual time exceeds schedule by {(time_ratio - 1) * 100:.1f}%"
+            })
 
         if mile_ratio > 1.10:
-            alerts.append({"severity": "medium", "text": f"Actual miles exceed scheduled miles by {(mile_ratio - 1) * 100:.1f}%"})
+            alerts.append({
+                "severity": "medium",
+                "text": f"Actual miles exceed scheduled miles by {(mile_ratio - 1) * 100:.1f}%"
+            })
     else:
         alerts.append({"severity": "low", "text": "No driver performance record found"})
 
     return alerts
-
-
-def build_vehicle_index_by_driver() -> Dict[int, VehicleRecord]:
-    vehicle_by_driver: Dict[int, VehicleRecord] = {}
-    for vehicle in VEHICLES.values():
-        for driver_id in vehicle.assigned_driver_ids:
-            vehicle_by_driver[driver_id] = vehicle
-    return vehicle_by_driver
-
-
-def build_dispatch_candidates() -> List[DispatchCandidate]:
-    vehicle_by_driver = build_vehicle_index_by_driver()
-
-    candidates: List[DispatchCandidate] = []
-    for driver in DRIVERS.values():
-        candidates.append(
-            DispatchCandidate(
-                driver=driver,
-                vehicle=vehicle_by_driver.get(driver.driver_id),
-                performance=PERFORMANCE.get(driver.driver_id),
-            )
-        )
-    return candidates
 
 
 # ============================================================
@@ -292,18 +298,6 @@ def normalize_driver(item: dict) -> DriverProfile:
 
 
 def normalize_vehicle(item: dict) -> VehicleRecord:
-    assignments = item.get("assignments_drivers", {}) or {}
-    driver_ids = assignments.get("driver_ids", []) or []
-
-    if not driver_ids:
-        driver_ids = [
-            d.get("assign_driver_id")
-            for d in assignments.get("assign_driver_info", [])
-            if d.get("assign_driver_id") is not None
-        ]
-
-    driver_ids = [int(d) for d in driver_ids]
-
     return VehicleRecord(
         vehicle_id=int(item["vehicle_id"]),
         owner_id=item.get("owner_id"),
@@ -317,8 +311,27 @@ def normalize_vehicle(item: dict) -> VehicleRecord:
         vehicle_make=item.get("vehicle_make"),
         vehicle_model=item.get("vehicle_model"),
         created_date=item.get("created_date"),
-        assigned_driver_ids=driver_ids,
     )
+
+
+def extract_vehicle_driver_assignments(item: dict) -> list[dict]:
+    assignments = item.get("assignments_drivers", {}) or {}
+    driver_ids = assignments.get("driver_ids", []) or []
+
+    if not driver_ids:
+        driver_ids = [
+            d.get("assign_driver_id")
+            for d in assignments.get("assign_driver_info", [])
+            if d.get("assign_driver_id") is not None
+        ]
+
+    return [
+        {
+            "vehicle_id": int(item["vehicle_id"]),
+            "driver_id": int(driver_id),
+        }
+        for driver_id in driver_ids
+    ]
 
 
 def normalize_performance(item: dict) -> DriverPerformance:
@@ -330,6 +343,95 @@ def normalize_performance(item: dict) -> DriverPerformance:
         schedule_time=int(item.get("schedule_time", 0) or 0),
         actual_time=int(item.get("actual_time", 0) or 0),
     )
+
+
+# ============================================================
+# Supabase fetch helpers
+# ============================================================
+
+def fetch_all_drivers() -> list[DriverProfile]:
+    res = supabase.table("drivers").select("*").execute()
+    return [DriverProfile(**row) for row in (res.data or [])]
+
+
+def fetch_all_vehicles() -> list[VehicleRecord]:
+    res = supabase.table("vehicles").select("*").execute()
+    return [VehicleRecord(**row) for row in (res.data or [])]
+
+
+def fetch_all_performance() -> dict[int, DriverPerformance]:
+    res = supabase.table("driver_performance").select("*").execute()
+    perf_map: dict[int, DriverPerformance] = {}
+
+    for row in (res.data or []):
+        perf = DriverPerformance(
+            driver_id=int(row["driver_id"]),
+            oor_miles=float(row["oor_miles"]),
+            schedule_miles=float(row["schedule_miles"]),
+            actual_miles=float(row["actual_miles"]),
+            schedule_time=int(row["schedule_time"]),
+            actual_time=int(row["actual_time"]),
+            created_at=row.get("created_at"),
+            updated_at=row.get("updated_at"),
+        )
+        perf_map[perf.driver_id] = perf
+
+    return perf_map
+
+
+def fetch_vehicle_assignments() -> dict[int, VehicleRecord]:
+    assignments_res = supabase.table("vehicle_driver_assignments").select("vehicle_id,driver_id").execute()
+    vehicles = fetch_all_vehicles()
+    vehicle_by_id = {vehicle.vehicle_id: vehicle for vehicle in vehicles}
+
+    vehicle_by_driver: dict[int, VehicleRecord] = {}
+    for row in (assignments_res.data or []):
+        vehicle = vehicle_by_id.get(int(row["vehicle_id"]))
+        if vehicle:
+            vehicle_by_driver[int(row["driver_id"])] = vehicle
+
+    return vehicle_by_driver
+
+
+def fetch_load(load_id: str) -> Optional[LoadRecord]:
+    res = supabase.table("loads").select("*").eq("id", load_id).limit(1).execute()
+    if not res.data:
+        return None
+
+    row = res.data[0]
+    return LoadRecord(
+        id=row["id"],
+        pickup_name=row["pickup_name"],
+        pickup_address=row["pickup_address"],
+        pickup_lat=float(row["pickup_lat"]),
+        pickup_lng=float(row["pickup_lng"]),
+        dropoff_name=row["dropoff_name"],
+        dropoff_address=row["dropoff_address"],
+        dropoff_lat=float(row["dropoff_lat"]),
+        dropoff_lng=float(row["dropoff_lng"]),
+        pickup_time=row["pickup_time"],
+        dropoff_time=row["dropoff_time"],
+        required_trailer_type=row.get("required_trailer_type"),
+        required_vehicle_type=row.get("required_vehicle_type"),
+        created_at=row.get("created_at"),
+    )
+
+
+def build_dispatch_candidates() -> List[DispatchCandidate]:
+    drivers = fetch_all_drivers()
+    vehicle_by_driver = fetch_vehicle_assignments()
+    performance_by_driver = fetch_all_performance()
+
+    candidates: List[DispatchCandidate] = []
+    for driver in drivers:
+        candidates.append(
+            DispatchCandidate(
+                driver=driver,
+                vehicle=vehicle_by_driver.get(driver.driver_id),
+                performance=performance_by_driver.get(driver.driver_id),
+            )
+        )
+    return candidates
 
 
 # ============================================================
@@ -348,7 +450,7 @@ def build_driver_card(candidate: DispatchCandidate) -> dict:
 
     alerts = build_alerts(driver, vehicle, perf)
 
-    card = {
+    return {
         "driver_id": driver.driver_id,
         "name": driver.full_name,
         "vehicle_no": vehicle.vehicle_no if vehicle else None,
@@ -381,8 +483,6 @@ def build_driver_card(candidate: DispatchCandidate) -> dict:
         } if perf else None,
     }
 
-    return card
-
 
 # ============================================================
 # Recommendation logic
@@ -397,7 +497,6 @@ def score_candidate(load: LoadRecord, candidate: DispatchCandidate) -> dict:
     vehicle = candidate.vehicle
     perf = candidate.performance
 
-    # Driver status / availability
     if driver.work_status in {"OFF_DUTY", "INACTIVE"}:
         score -= 50
         warnings.append(f"Driver work status is {driver.work_status}")
@@ -410,7 +509,6 @@ def score_candidate(load: LoadRecord, candidate: DispatchCandidate) -> dict:
     else:
         reasons.append("Driver has no current active load")
 
-    # Vehicle compatibility
     if vehicle is None:
         score -= 40
         warnings.append("No assigned vehicle found")
@@ -434,7 +532,6 @@ def score_candidate(load: LoadRecord, candidate: DispatchCandidate) -> dict:
             else:
                 reasons.append(f"Trailer type matches: {vehicle.trailer_type}")
 
-    # Performance quality
     if perf:
         oor_ratio = safe_ratio(perf.oor_miles, perf.schedule_miles)
         time_ratio = safe_ratio(float(perf.actual_time), float(perf.schedule_time))
@@ -483,13 +580,22 @@ def score_candidate(load: LoadRecord, candidate: DispatchCandidate) -> dict:
 
 @app.get("/health")
 def health():
-    return jsonify({
-        "status": "ok",
-        "drivers": len(DRIVERS),
-        "vehicles": len(VEHICLES),
-        "performance": len(PERFORMANCE),
-        "loads": len(LOADS),
-    })
+    return jsonify({"status": "ok"})
+
+
+@app.get("/health/db")
+def health_db():
+    try:
+        res = supabase.table("drivers").select("driver_id", count="exact").limit(1).execute()
+        return jsonify({
+            "status": "ok",
+            "drivers_count": res.count,
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e),
+        }), 500
 
 
 @app.post("/ingest/drivers")
@@ -497,14 +603,19 @@ def ingest_drivers():
     payload = request.get_json(force=True)
     items = payload.get("data", [])
 
-    for item in items:
-        driver = normalize_driver(item)
-        DRIVERS[driver.driver_id] = driver
+    rows = [asdict(normalize_driver(item)) for item in items]
+
+    for row in rows:
+        row.pop("created_at", None)
+        row.pop("updated_at", None)
+
+    if rows:
+        supabase.table("drivers").upsert(rows).execute()
+        supabase.table("ingest_driver_batches").insert({"payload": payload}).execute()
 
     return jsonify({
         "success": True,
-        "ingested_count": len(items),
-        "total_drivers": len(DRIVERS),
+        "ingested_count": len(rows),
     })
 
 
@@ -513,14 +624,35 @@ def ingest_vehicles():
     payload = request.get_json(force=True)
     items = payload.get("data", [])
 
+    vehicle_rows = []
+    assignment_rows = []
+
     for item in items:
-        vehicle = normalize_vehicle(item)
-        VEHICLES[vehicle.vehicle_id] = vehicle
+        vehicle_row = asdict(normalize_vehicle(item))
+        vehicle_row.pop("created_at", None)
+        vehicle_row.pop("updated_at", None)
+        vehicle_rows.append(vehicle_row)
+
+        assignment_rows.extend(extract_vehicle_driver_assignments(item))
+
+    if vehicle_rows:
+        supabase.table("vehicles").upsert(vehicle_rows).execute()
+        supabase.table("ingest_vehicle_batches").insert({"payload": payload}).execute()
+
+    affected_vehicle_ids = list({row["vehicle_id"] for row in assignment_rows})
+    if affected_vehicle_ids:
+        supabase.table("vehicle_driver_assignments").delete().in_("vehicle_id", affected_vehicle_ids).execute()
+
+    if assignment_rows:
+        supabase.table("vehicle_driver_assignments").upsert(
+            assignment_rows,
+            on_conflict="vehicle_id,driver_id"
+        ).execute()
 
     return jsonify({
         "success": True,
-        "ingested_count": len(items),
-        "total_vehicles": len(VEHICLES),
+        "ingested_count": len(vehicle_rows),
+        "assignment_count": len(assignment_rows),
     })
 
 
@@ -529,30 +661,40 @@ def ingest_driver_performance():
     payload = request.get_json(force=True)
     items = payload.get("data", [])
 
-    for item in items:
-        perf = normalize_performance(item)
-        PERFORMANCE[perf.driver_id] = perf
+    rows = [asdict(normalize_performance(item)) for item in items]
+
+    for row in rows:
+        row.pop("created_at", None)
+        row.pop("updated_at", None)
+
+    if rows:
+        supabase.table("driver_performance").upsert(rows).execute()
+        supabase.table("ingest_driver_performance_batches").insert({"payload": payload}).execute()
 
     return jsonify({
         "success": True,
-        "ingested_count": len(items),
-        "total_performance_records": len(PERFORMANCE),
+        "ingested_count": len(rows),
     })
 
 
 @app.get("/debug/drivers")
 def debug_drivers():
-    return jsonify([asdict(d) for d in DRIVERS.values()])
+    return jsonify(supabase.table("drivers").select("*").execute().data)
 
 
 @app.get("/debug/vehicles")
 def debug_vehicles():
-    return jsonify([asdict(v) for v in VEHICLES.values()])
+    return jsonify(supabase.table("vehicles").select("*").execute().data)
 
 
 @app.get("/debug/performance")
 def debug_performance():
-    return jsonify([asdict(p) for p in PERFORMANCE.values()])
+    return jsonify(supabase.table("driver_performance").select("*").execute().data)
+
+
+@app.get("/debug/vehicle-assignments")
+def debug_vehicle_assignments():
+    return jsonify(supabase.table("vehicle_driver_assignments").select("*").execute().data)
 
 
 @app.get("/debug/candidates")
@@ -589,35 +731,35 @@ def create_load():
     payload = request.get_json(force=True)
 
     load_id = str(uuid4())
-    load = LoadRecord(
-        id=load_id,
-        pickup_name=payload["pickup_name"],
-        pickup_address=payload["pickup_address"],
-        pickup_lat=float(payload["pickup_lat"]),
-        pickup_lng=float(payload["pickup_lng"]),
-        dropoff_name=payload["dropoff_name"],
-        dropoff_address=payload["dropoff_address"],
-        dropoff_lat=float(payload["dropoff_lat"]),
-        dropoff_lng=float(payload["dropoff_lng"]),
-        pickup_time=payload["pickup_time"],
-        dropoff_time=payload["dropoff_time"],
-        required_trailer_type=payload.get("required_trailer_type"),
-        required_vehicle_type=payload.get("required_vehicle_type", "TRUCK"),
-        created_at=now_iso(),
-    )
-    LOADS[load_id] = load
+    row = {
+        "id": load_id,
+        "pickup_name": payload["pickup_name"],
+        "pickup_address": payload["pickup_address"],
+        "pickup_lat": float(payload["pickup_lat"]),
+        "pickup_lng": float(payload["pickup_lng"]),
+        "dropoff_name": payload["dropoff_name"],
+        "dropoff_address": payload["dropoff_address"],
+        "dropoff_lat": float(payload["dropoff_lat"]),
+        "dropoff_lng": float(payload["dropoff_lng"]),
+        "pickup_time": payload["pickup_time"],
+        "dropoff_time": payload["dropoff_time"],
+        "required_trailer_type": payload.get("required_trailer_type"),
+        "required_vehicle_type": payload.get("required_vehicle_type", "TRUCK"),
+    }
 
-    return jsonify(asdict(load)), 201
+    result = supabase.table("loads").insert(row).execute()
+    return jsonify(result.data[0]), 201
 
 
 @app.get("/loads")
 def list_loads():
-    return jsonify([asdict(load) for load in LOADS.values()])
+    res = supabase.table("loads").select("*").execute()
+    return jsonify(res.data)
 
 
 @app.get("/loads/<load_id>")
 def get_load(load_id: str):
-    load = LOADS.get(load_id)
+    load = fetch_load(load_id)
     if not load:
         return jsonify({"error": "Load not found"}), 404
     return jsonify(asdict(load))
@@ -625,7 +767,7 @@ def get_load(load_id: str):
 
 @app.get("/loads/<load_id>/recommendations")
 def get_load_recommendations(load_id: str):
-    load = LOADS.get(load_id)
+    load = fetch_load(load_id)
     if not load:
         return jsonify({"error": "Load not found"}), 404
 
@@ -638,7 +780,7 @@ def get_load_recommendations(load_id: str):
 
 @app.get("/loads/<load_id>/recommendation/top")
 def get_top_load_recommendation(load_id: str):
-    load = LOADS.get(load_id)
+    load = fetch_load(load_id)
     if not load:
         return jsonify({"error": "Load not found"}), 404
 
@@ -652,193 +794,54 @@ def get_top_load_recommendation(load_id: str):
     return jsonify(ranked[0])
 
 
-# ============================================================
-# AI Chat Endpoint
-# ============================================================
+@app.get("/loads/<load_id>/recommendation/explain")
+def explain_load_recommendation(load_id: str):
+    load = fetch_load(load_id)
+    if not load:
+        return jsonify({"error": "Load not found"}), 404
 
-@app.route('/api/chat', methods=['POST'])
-def chat():
-    data = request.get_json(force=True) or {}
-    question = data.get('question', '')
-    history = data.get('history', [])
+    candidates = build_dispatch_candidates()
+    ranked = [score_candidate(load, candidate) for candidate in candidates]
+    ranked.sort(key=lambda x: (x["feasible"], x["score"]), reverse=True)
 
-    if not question:
-        return jsonify({"error": "No question provided"}), 400
+    if not ranked:
+        return jsonify({"error": "No candidates found"}), 404
 
+    # Get the top a few candidates to provide context for the AI
+    top_candidates = ranked[:3]
+    top_driver = top_candidates[0]
+
+    # Construction of prompt
+    prompt_lines = [
+        f"We need to recommend the best driver for load #{load_id} going from '{load.pickup_address}' to '{load.dropoff_address}'.",
+        "Our deterministic algorithm has ranked the feasible drivers based on specific weights (e.g., active vehicle, current status in-transit vs off-duty, performance mileage out-of-route, and vehicle matching constraints).",
+        "Please provide a 3-4 sentence professional explanation for dispatchers. Focus on how the weights split, the trade-offs, and why the top driver is fundamentally better. For instance, explain why sticking with an in-transit driver facing slight traffic/delay is better than picking an off-duty operator or switching out an assigned vehicle."
+    ]
+
+    for idx, c in enumerate(top_candidates):
+        rank = idx + 1
+        d = c["driver_card"]
+        prompt_lines.append(
+            f"Rank {rank}: {c['driver_name']} (Score: {c['score']}). "
+            f"Status: {d.get('status_label')}. "
+            f"ETA: {d.get('eta_label')}. "
+            f"Reasons for score: {', '.join(c['reasons'])}. "
+            f"Warnings/Penalties: {', '.join(c['warnings'])}."
+        )
+
+    prompt = "\\n".join(prompt_lines)
+    
     try:
-        # Resolve the query using the LLM-driven dispatch service
-        response = process_dispatch_query(question, context={"history": history})
-        return jsonify(response)
+        rationale = generate_text(prompt)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        rationale = f"AI Generation failed: {str(e)}"
 
-
-# ============================================================
-# Optional seed data for local testing
-# ============================================================
-
-def seed_demo_data():
-    if DRIVERS:
-        return
-
-    driver_payload = {
-        "data": [
-            {
-                "driver_id": 12154,
-                "basic_info": {
-                    "driver_first_name": "John",
-                    "driver_last_name": "Doe",
-                    "carrier": "Big Fleet Co.",
-                    "work_status": "IN_TRANSIT",
-                    "terminal": "Terminal A",
-                    "driver_type": "OWNER_OPERATOR_OO",
-                    "driver_phone_number": "111-222-3333",
-                    "driver_email": "johndoe@driver.com",
-                },
-                "driver_location": {
-                    "last_known_location": "S Martin L King Blvd, Las Vegas, NV",
-                    "latest_update": 1681440338089,
-                    "timezone": "PDT",
-                },
-                "loads": {
-                    "driver_current_load": {
-                        "load_id": 9964234,
-                        "load_show_id": "10",
-                        "origin": "Pueblo, CO",
-                        "destination": "Los Angeles, CA",
-                        "pickup_date": 1680310861000,
-                        "delivery_date": 1981794989000,
-                    }
-                },
-            },
-            {
-                "driver_id": 12155,
-                "basic_info": {
-                    "driver_first_name": "Sara",
-                    "driver_last_name": "Lee",
-                    "carrier": "Big Fleet Co.",
-                    "work_status": "AVAILABLE",
-                    "terminal": "Terminal B",
-                    "driver_type": "COMPANY_DRIVER",
-                    "driver_phone_number": "222-333-4444",
-                    "driver_email": "saralee@driver.com",
-                },
-                "driver_location": {
-                    "last_known_location": "Phoenix, AZ",
-                    "latest_update": 1681440338089,
-                    "timezone": "MST",
-                },
-                "loads": {},
-            },
-        ]
-    }
-
-    vehicle_payload = {
-        "data": [
-            {
-                "created_date": "Apr 14, 2023",
-                "vehicle_id": 840215,
-                "owner_id": 49845,
-                "owner_name": "Operator A",
-                "vehicle_status": "ACTIVE",
-                "vehicle_no": "TRK-201",
-                "vehicle_type": "TRUCK",
-                "vehicle_vin": "1HGCM82633A123456",
-                "gross_vehicle_weight": 3500,
-                "trailer_type": "VAN",
-                "vehicle_make": "Freightliner",
-                "vehicle_model": "Cascadia",
-                "assignments_drivers": {
-                    "driver_ids": [12154],
-                    "assign_driver_info": [
-                        {
-                            "assign_driver_id": 12154,
-                            "assign_driver_name": "John Doe",
-                        }
-                    ],
-                },
-            },
-            {
-                "created_date": "Apr 15, 2023",
-                "vehicle_id": 840216,
-                "owner_id": 49845,
-                "owner_name": "Operator A",
-                "vehicle_status": "ACTIVE",
-                "vehicle_no": "TRK-202",
-                "vehicle_type": "TRUCK",
-                "vehicle_vin": "1HGCM82633A123457",
-                "gross_vehicle_weight": 3500,
-                "trailer_type": "VAN",
-                "vehicle_make": "Peterbilt",
-                "vehicle_model": "579",
-                "assignments_drivers": {
-                    "driver_ids": [12155],
-                    "assign_driver_info": [
-                        {
-                            "assign_driver_id": 12155,
-                            "assign_driver_name": "Sara Lee",
-                        }
-                    ],
-                },
-            },
-        ]
-    }
-
-    performance_payload = {
-        "data": [
-            {
-                "driver_id": 12154,
-                "oor_miles": 12.5,
-                "schedule_miles": 500,
-                "actual_miles": 512.5,
-                "schedule_time": 480,
-                "actual_time": 495,
-            },
-            {
-                "driver_id": 12155,
-                "oor_miles": 3.0,
-                "schedule_miles": 450,
-                "actual_miles": 452.0,
-                "schedule_time": 470,
-                "actual_time": 468,
-            },
-        ]
-    }
-
-    for item in driver_payload["data"]:
-        driver = normalize_driver(item)
-        DRIVERS[driver.driver_id] = driver
-
-    for item in vehicle_payload["data"]:
-        vehicle = normalize_vehicle(item)
-        VEHICLES[vehicle.vehicle_id] = vehicle
-
-    for item in performance_payload["data"]:
-        perf = normalize_performance(item)
-        PERFORMANCE[perf.driver_id] = perf
-
-    # Seed a demo load
-    demo_load = LoadRecord(
-        id="LD-4821",
-        pickup_name="Pueblo Warehouse",
-        pickup_address="123 Industrial Way, Pueblo, CO",
-        pickup_lat=38.2544,
-        pickup_lng=-104.6091,
-        dropoff_name="LA Port Terminal",
-        dropoff_address="456 Harbor Blvd, Los Angeles, CA",
-        dropoff_lat=33.7701,
-        dropoff_lng=-118.1937,
-        pickup_time="Today 14:00",
-        dropoff_time="Tomorrow 08:00",
-        required_trailer_type="VAN",
-        required_vehicle_type="TRUCK",
-        created_at=now_iso()
-    )
-    LOADS[demo_load.id] = demo_load
-
-
-seed_demo_data()
+    return jsonify({
+        "top_candidate": top_driver,
+        "ai_rationale": rationale,
+        "runner_ups": top_candidates[1:]
+    })
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8000, debug=True)
+    app.run(host="0.0.0.0", port=PORT, debug=True)
