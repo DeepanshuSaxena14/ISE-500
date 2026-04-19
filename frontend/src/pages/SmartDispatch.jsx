@@ -219,6 +219,8 @@ export default function SmartDispatch() {
         actualMiles: r.driver_card.performance ? r.driver_card.performance.actual_miles : null,
         scheduleTime: r.driver_card.performance ? r.driver_card.performance.schedule_time : null,
         actualTime: r.driver_card.performance ? r.driver_card.performance.actual_time : null,
+        score: r.score,
+        feasible: r.feasible,
       }));
 
       const reasoning = {};

@@ -168,6 +168,7 @@ _BASE_LOAD_REQUESTS = [
         "pickup_time": iso_z(now_utc() + timedelta(hours=2)),
         "dropoff_time": iso_z(now_utc() + timedelta(hours=18)),
         "required_trailer_type": "VAN", "required_vehicle_type": "TRUCK",
+        "weight_lbs": 15000.0,
     },
     {
         # Los Angeles, CA Load (Needs REEFER) -> Target: LA Driver #2 (REEFER)
@@ -178,6 +179,7 @@ _BASE_LOAD_REQUESTS = [
         "pickup_time": iso_z(now_utc() + timedelta(hours=1)),
         "dropoff_time": iso_z(now_utc() + timedelta(hours=12)),
         "required_trailer_type": "REEFER", "required_vehicle_type": "TRUCK",
+        "weight_lbs": 22000.0,
     },
     {
         # Dallas, TX Load (Needs FLATBED) -> Target: Dallas Driver #3 (FLATBED)
@@ -188,6 +190,7 @@ _BASE_LOAD_REQUESTS = [
         "pickup_time": iso_z(now_utc() + timedelta(hours=4)),
         "dropoff_time": iso_z(now_utc() + timedelta(hours=10)),
         "required_trailer_type": "FLATBED", "required_vehicle_type": "TRUCK",
+        "weight_lbs": 35000.0,
     },
     {
         # Seattle, WA Load (Needs VAN) -> Target: Seattle Driver #0
@@ -198,6 +201,7 @@ _BASE_LOAD_REQUESTS = [
         "pickup_time": iso_z(now_utc() + timedelta(hours=2)),
         "dropoff_time": iso_z(now_utc() + timedelta(hours=6)),
         "required_trailer_type": "VAN", "required_vehicle_type": "TRUCK",
+        "weight_lbs": 8000.0,
     },
     {
         # Chicago, IL Load (Needs REEFER) -> Target: Chicago Driver #2
@@ -208,6 +212,7 @@ _BASE_LOAD_REQUESTS = [
         "pickup_time": iso_z(now_utc() + timedelta(hours=5)),
         "dropoff_time": iso_z(now_utc() + timedelta(hours=14)),
         "required_trailer_type": "REEFER", "required_vehicle_type": "TRUCK",
+        "weight_lbs": 12000.0,
     },
     {
         # Atlanta, GA Load (Needs FLATBED) -> Target: Atlanta Driver #3
@@ -218,6 +223,7 @@ _BASE_LOAD_REQUESTS = [
         "pickup_time": iso_z(now_utc() + timedelta(hours=3)),
         "dropoff_time": iso_z(now_utc() + timedelta(hours=9)),
         "required_trailer_type": "FLATBED", "required_vehicle_type": "TRUCK",
+        "weight_lbs": 42000.0,
     },
     {
         # New York, NY Load (Needs VAN) -> Target: NY Driver #0
@@ -228,6 +234,7 @@ _BASE_LOAD_REQUESTS = [
         "pickup_time": iso_z(now_utc() + timedelta(hours=1)),
         "dropoff_time": iso_z(now_utc() + timedelta(hours=4)),
         "required_trailer_type": "VAN", "required_vehicle_type": "TRUCK",
+        "weight_lbs": 5000.0,
     },
     {
         # Miami, FL Load (Needs REEFER) -> Target: Miami Driver #2
@@ -238,6 +245,7 @@ _BASE_LOAD_REQUESTS = [
         "pickup_time": iso_z(now_utc() + timedelta(hours=2)),
         "dropoff_time": iso_z(now_utc() + timedelta(hours=7)),
         "required_trailer_type": "REEFER", "required_vehicle_type": "TRUCK",
+        "weight_lbs": 18000.0,
     },
     {
         # Denver, CO Load (Needs FLATBED) -> Target: Denver Driver #3
@@ -248,6 +256,7 @@ _BASE_LOAD_REQUESTS = [
         "pickup_time": iso_z(now_utc() + timedelta(hours=3)),
         "dropoff_time": iso_z(now_utc() + timedelta(hours=6)),
         "required_trailer_type": "FLATBED", "required_vehicle_type": "TRUCK",
+        "weight_lbs": 28000.0,
     },
     {
         # Salt Lake City, UT Load (Needs VAN) -> Target: SLC Driver #0
@@ -258,6 +267,18 @@ _BASE_LOAD_REQUESTS = [
         "pickup_time": iso_z(now_utc() + timedelta(hours=2)),
         "dropoff_time": iso_z(now_utc() + timedelta(hours=10)),
         "required_trailer_type": "VAN", "required_vehicle_type": "TRUCK",
+        "weight_lbs": 30000.0,
+    },
+    {
+        # Edge Case: Extreme Urgency + Overweight Risk for Consolidation
+        "pickup_name": "Emergency Parts Depot", "pickup_address": "99 Crisis Way, Seattle, WA",
+        "pickup_lat": 47.6062, "pickup_lng": -122.3321,
+        "dropoff_name": "Factory Z", "dropoff_address": "1 Factory Ln, Portland, OR",
+        "dropoff_lat": 45.5152, "dropoff_lng": -122.6784,
+        "pickup_time": iso_z(now_utc() + timedelta(minutes=45)), # Extremely tight
+        "dropoff_time": iso_z(now_utc() + timedelta(hours=5)),
+        "required_trailer_type": "VAN", "required_vehicle_type": "TRUCK",
+        "weight_lbs": 44000.0, # Heavy
     }
 ]
 
