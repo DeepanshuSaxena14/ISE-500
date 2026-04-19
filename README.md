@@ -52,7 +52,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 # Start the Flask web server
-python app.py
+python chat_service.py
 ```
 
 ### Terminal 2: Run the Web Frontend
