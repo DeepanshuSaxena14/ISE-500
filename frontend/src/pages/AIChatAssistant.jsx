@@ -216,12 +216,7 @@ export default function AIChatAssistant() {
         body: JSON.stringify({ text })
       });
       if (!resp.ok) throw new Error("TTS failed");
-      const data = await resp.json();
-      if (!data.audio_b64) throw new Error(data.error || "No audio returned");
-      const binary = atob(data.audio_b64);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      const blob = new Blob([bytes], { type: "audio/mpeg" });
+      const blob = await resp.blob();
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       audio.onended = () => setIsAudioLoading(null);
