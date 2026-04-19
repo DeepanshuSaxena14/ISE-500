@@ -28,14 +28,14 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
-      - name: Deploy dispatchiq-api (app.py)
+      - name: Deploy ISE-500 (app.py)
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
         run: |
           cd backend
           railway up \
-            --service dispatchiq-api \
+            --service ISE-500 \
             --detach
 
       - name: Confirm
@@ -52,14 +52,14 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
-      - name: Deploy dispatchiq-chat (chat_service.py)
+      - name: Deploy dynamic-analysis (chat_service.py)
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
         run: |
           cd backend
           railway up \
-            --service dispatchiq-chat \
+            --service dynamic-analysis \
             --detach
 
       - name: Confirm
