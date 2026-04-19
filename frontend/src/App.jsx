@@ -7,6 +7,8 @@ import AIChatAssistant from './pages/AIChatAssistant';
 import Alerts from './pages/Alerts';
 import Briefings from './pages/Briefings';
 import Settings from './pages/Settings';
+import AddLoadWithLocation from './pages/AddLoadWithLocation';
+import AddDriver from './pages/AddDriver';
 
 function App() {
   return (
@@ -19,6 +21,8 @@ function App() {
         <Route path="alerts" element={<Alerts />} />
         <Route path="briefings" element={<Briefings />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="map" element={<AddLoadWithLocation />} />
+        <Route path="add-driver" element={<AddDriver />} />
       </Route>
     </Routes>
   );

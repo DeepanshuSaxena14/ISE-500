@@ -27,6 +27,12 @@ export const fleetService = {
     console.warn('[fleetService] falling back to mock drivers');
     return mockDrivers;
   },
+  createDriver: async (payload) => {
+    return fetchJson('/ingest/drivers', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
 };
 
 export const dispatchService = {
@@ -47,6 +53,12 @@ export const dispatchService = {
   },
   getLoads: async () => {
     return fetchJson('/loads');
+  },
+  createLoad: async (payload) => {
+    return fetchJson('/loads', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   }
 };
 

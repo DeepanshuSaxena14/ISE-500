@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useLocation } from "react-router-dom";
 import { dispatchService } from "../api";
 
 const DEFAULT_LOAD = {
@@ -17,46 +18,38 @@ const DEFAULT_LOAD = {
   specialNotes: "Liftgate required. No-touch freight.",
 };
 
-const MOCK_DRIVERS = [
-  {
-    id: "D-001", name: "Marcus Rivera", avatar: "MR",
-    location: "Mesa, AZ", distanceToPickup: 18,
-    hosRemaining: 9.5, hosStatus: "Available",
-    lastLoad: "Tucson → Phoenix", truckId: "TRK-114",
-    fuelLevel: 78, rating: 4.8, totalMiles: 312000,
-    recentOnTime: 96, deadheadMiles: 18,
-    estimatedCostPerMile: 2.61, estimatedFuelCost: 198,
-  },
-  {
-    id: "D-002", name: "Sandra Kim", avatar: "SK",
-    location: "Tempe, AZ", distanceToPickup: 22,
-    hosRemaining: 7.2, hosStatus: "Available",
-    lastLoad: "Flagstaff → Tempe", truckId: "TRK-089",
-    fuelLevel: 52, rating: 4.9, totalMiles: 287000,
-    recentOnTime: 98, deadheadMiles: 22,
-    estimatedCostPerMile: 2.68, estimatedFuelCost: 211,
-  },
-  {
-    id: "D-003", name: "James Okafor", avatar: "JO",
-    location: "Chandler, AZ", distanceToPickup: 31,
-    hosRemaining: 6.0, hosStatus: "At Risk",
-    lastLoad: "Albuquerque → Chandler", truckId: "TRK-201",
-    fuelLevel: 34, rating: 4.5, totalMiles: 198000,
-    recentOnTime: 88, deadheadMiles: 31,
-    estimatedCostPerMile: 2.74, estimatedFuelCost: 228,
-  },
-  {
-    id: "D-004", name: "Tanya Reyes", avatar: "TR",
-    location: "Gilbert, AZ", distanceToPickup: 41,
-    hosRemaining: 10.0, hosStatus: "Available",
-    lastLoad: "Tucson → Gilbert", truckId: "TRK-177",
-    fuelLevel: 91, rating: 4.7, totalMiles: 254000,
-    recentOnTime: 93, deadheadMiles: 41,
-    estimatedCostPerMile: 2.79, estimatedFuelCost: 245,
-  },
-];
 
 const HOS_NEEDED = 8.5;
+
+// Haversine formula to calculate miles between two coordinates
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 3958.8; // Radius of the Earth in miles
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(R * c);
+}
+
+// Fetch coordinates for a location string using Photon API
+async function geocodeLocation(locationLabel) {
+  if (!locationLabel) return null;
+  try {
+    const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(locationLabel)}&limit=1`);
+    const data = await res.json();
+    if (data.features?.length > 0) {
+      return {
+        lat: data.features[0].geometry.coordinates[1],
+        lng: data.features[0].geometry.coordinates[0],
+      };
+    }
+  } catch (err) {
+    console.error("Geocoding failed:", err);
+  }
+  return null;
+}
 
 function ScoreBar({ value, max = 100, color }) {
   const pct = Math.round((value / max) * 100);
@@ -164,19 +157,32 @@ export default function SmartDispatch() {
   const [overallLoading, setOverallLoading] = useState(false);
   const [rankedDrivers, setRankedDrivers] = useState([]);
   const [analysisPhase, setAnalysisPhase] = useState("");
+  const location = useLocation();
+  const navigatedLoadId = location.state?.selectedLoadId;
 
   useEffect(() => {
     dispatchService.getLoads()
       .then(loads => {
+        if (navigatedLoadId) {
+          const found = loads.find(l => l.id === navigatedLoadId);
+          if (found) {
+            setLoadsList(loads);
+            setLoad(found);
+            // Auto run recommendations for the new load
+            setTimeout(() => fetchRecommendations(found.id), 500);
+            return;
+          }
+        }
         if (loads && loads.length > 0) {
           setLoadsList(loads);
           setLoad(loads[0]);
         }
       })
       .catch(console.error);
-  }, []);
+  }, [navigatedLoadId]);
 
-  const fetchRecommendations = async () => {
+  const fetchRecommendations = async (specificLoadId) => {
+    const targetLoadId = specificLoadId || load.id;
     setOverallLoading(true);
     setAnalysisPhase("Fetching driver HOS & GPS data...");
 
@@ -359,6 +365,13 @@ Focus reasoning on: HOS fit, proximity to pickup, cost efficiency, on-time histo
   const selectedRank = rankedDrivers.findIndex(d => d.id === selectedDriver);
   const hasResults = Object.keys(aiResults).length > 0;
 
+  const actualMiles = (load.pickup_lat && load.dropoff_lat)
+    ? calculateDistance(load.pickup_lat, load.pickup_lng, load.dropoff_lat, load.dropoff_lng)
+    : (load.miles || 850);
+
+  const ratePerMile = 2.25;
+  const actualRate = (actualMiles * ratePerMile).toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 });
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
@@ -423,15 +436,15 @@ Focus reasoning on: HOS fit, proximity to pickup, cost efficiency, on-time histo
                 <div className="text-[11px] text-white/40 mt-0.5">{load.origin || load.pickup_name || 'N/A'} → {load.destination || load.dropoff_name || 'N/A'}</div>
               </div>
               <div className="text-right">
-                <div className="text-xl font-bold text-teal-300">{load.rate || '$2,450'}</div>
-                <div className="text-[11px] text-white/40">{load.ratePerMile || '$2.25'}/mi</div>
+                <div className="text-xl font-bold text-teal-300">{actualRate}</div>
+                <div className="text-[11px] text-white/40">${ratePerMile.toFixed(2)}/mi</div>
               </div>
             </div>
             <div className="grid grid-cols-4 gap-3 pt-3 border-t border-white/8">
               {[
-                ["Distance", `${load.miles || 850} mi`],
-                ["Pickup", load.pickupTime || load.pickup_time],
-                ["Deadline", load.deliveryDeadline || load.dropoff_time],
+                ["Distance", `${actualMiles} mi`],
+                ["Pickup", new Date(load.pickupTime || load.pickup_time).toLocaleString()],
+                ["Deadline", new Date(load.deliveryDeadline || load.dropoff_time).toLocaleString()],
                 ["Weight", load.weight || '42,000 lbs'],
               ].map(([label, val]) => (
                 <div key={label}>
@@ -543,7 +556,7 @@ Focus reasoning on: HOS fit, proximity to pickup, cost efficiency, on-time histo
                 <span className="text-sm font-bold text-teal-300">Load Assigned</span>
               </div>
               <p className="text-[11px] text-teal-300/70 leading-relaxed">
-                {LOAD.id} dispatched to <strong className="text-teal-200">{selectedInfo.name}</strong> ({selectedInfo.truckId}). Notification sent. ETA calculated.
+                {load.id} dispatched to <strong className="text-teal-200">{selectedInfo.name}</strong> ({selectedInfo.truckId}). Notification sent. ETA calculated.
               </p>
               <div className="mt-3 pt-3 border-t border-teal-500/20 text-[11px] text-teal-300/50">
                 Dispatched at {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
