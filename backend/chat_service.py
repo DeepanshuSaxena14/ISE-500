@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 import os
 import sys
+import base64
 from dotenv import load_dotenv, find_dotenv
 
 # Load environment variables from the root .env file
@@ -16,6 +17,11 @@ from ai.tools.tts import synthesize_speech
 app = Flask(__name__)
 # Enable CORS for all routes
 CORS(app)
+
+@app.route('/api/health', methods=['GET'])
+def health():
+    return jsonify({"status": "ok", "service": "dispatchiq-chat"}), 200
+
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
@@ -33,20 +39,20 @@ def chat():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 @app.route('/api/voice/tts', methods=['POST'])
 def tts():
+    """Convert a text briefing to speech via ElevenLabs. Returns audio/mpeg stream."""
     data = request.get_json() or {}
     text = data.get('text', '')
-    
     if not text:
         return jsonify({"error": "No text provided"}), 400
-        
     try:
-        audio_content = synthesize_speech(text)
-        if not audio_content:
-            return jsonify({"error": "Failed to synthesize speech"}), 500
-            
-        return Response(audio_content, mimetype="audio/mpeg")
+        result = synthesize_speech(text)
+        if result.get("error") and not result.get("audio_b64"):
+            return jsonify({"error": result["error"]}), 503
+        audio_bytes = base64.b64decode(result["audio_b64"])
+        return Response(audio_bytes, mimetype="audio/mpeg")
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

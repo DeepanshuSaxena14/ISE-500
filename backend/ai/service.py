@@ -16,15 +16,34 @@ from .handlers.dispatch import (
     handle_rank_drivers
 )
 
-# We now use the live API provider to fetch data from Supabase via the Flask backend.
-provider = APIFleetProvider()
+
+def _build_provider():
+    """
+    Try the live API provider first. If it can't reach the ops backend,
+    fall back to the mock provider so chat never goes dark during demo.
+    """
+    api = APIFleetProvider()
+    try:
+        summary = api.get_fleet_summary()
+        if summary.get("total_drivers", 0) > 0:
+            print("[service] Using live APIFleetProvider — backend reachable")
+            return api
+    except Exception as e:
+        print(f"[service] APIFleetProvider probe failed ({e}), falling back to mock")
+    print("[service] Using MockFleetProvider")
+    return MockFleetProvider()
+
+
+# Provider is resolved once at module load; stays for the process lifetime.
+provider = _build_provider()
+
 
 def process_dispatch_query(question: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
     """
     Main entry point for AI layer queries.
     """
     intent = detect_intent(question)
-    
+
     if intent == "fleet_summary":
         response = handle_fleet_summary(question, provider, context)
     elif intent in ["greeting", "general_chat"]:

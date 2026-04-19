@@ -1,7 +1,7 @@
 # ================================================================
 # DispatchIQ — Frontend Deploy (Vercel)
-# Triggers on push to main branch only.
-# Deploys the React/Vite frontend to Vercel.
+# Triggers on every push to main that touches frontend/ files.
+# Builds with Vite and deploys to Vercel production.
 # ================================================================
 
 name: Deploy Frontend
@@ -16,7 +16,7 @@ on:
 
 jobs:
   deploy:
-    name: Deploy to Vercel
+    name: Build & Deploy → Vercel
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -39,13 +39,25 @@ jobs:
       - name: Build
         env:
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
+          VITE_CHAT_URL: ${{ secrets.VITE_CHAT_URL }}
         run: npm run build
 
-      - name: Deploy to Vercel
+      - name: Install Vercel CLI
+        run: npm install -g vercel
+
+      - name: Pull Vercel environment
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-        run: |
-          npm install -g vercel
-          vercel deploy --prod --token=$VERCEL_TOKEN --yes
+        run: vercel pull --yes --environment=production --token=$VERCEL_TOKEN
+
+      - name: Deploy prebuilt to Vercel
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: vercel deploy --prebuilt --prod --token=$VERCEL_TOKEN
+
+      - name: Confirm
+        run: echo "Frontend deployed to Vercel at $(date -u)"
