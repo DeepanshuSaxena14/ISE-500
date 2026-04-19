@@ -16,8 +16,8 @@ from .handlers.dispatch import (
     handle_rank_drivers
 )
 
-# For hackathon/demo, we use Mock provider by default.
-provider = MockFleetProvider()
+# We now use the live API provider to fetch data from Supabase via the Flask backend.
+provider = APIFleetProvider()
 
 def process_dispatch_query(question: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
     """
