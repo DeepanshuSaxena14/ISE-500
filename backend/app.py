@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import math
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +17,32 @@ from ai.tools.llm import generate_text
 
 app = Flask(__name__)
 CORS(app)
+
+# ------------------------------------------------------------
+# Geospatial helpers
+# ------------------------------------------------------------
+
+CITY_COORDS = {
+    "Phoenix, AZ": (33.4484, -112.0740),
+    "Los Angeles, CA": (34.0522, -118.2437),
+    "Dallas, TX": (32.7767, -96.7970),
+    "Seattle, WA": (47.6062, -122.3321),
+    "Chicago, IL": (41.8781, -87.6298),
+    "Atlanta, GA": (33.7490, -84.3880),
+    "New York, NY": (40.7128, -74.0060),
+    "Miami, FL": (25.7617, -80.1918),
+    "Denver, CO": (39.7392, -104.9903),
+    "Salt Lake City, UT": (40.7608, -111.8910),
+}
+
+def haversine(lat1, lon1, lat2, lon2):
+    R = 3958.8 # Earth radius in miles
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (math.sin(dlat / 2) ** 2 +
+         math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2)
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
 
 # ------------------------------------------------------------
 # .env diagnostics
@@ -434,11 +461,7 @@ def build_dispatch_candidates() -> List[DispatchCandidate]:
     return candidates
 
 
-# ============================================================
-# Frontend-ready driver card shape
-# ============================================================
-
-def build_driver_card(candidate: DispatchCandidate) -> dict:
+def build_driver_card(candidate: DispatchCandidate, load: Optional[LoadRecord] = None) -> dict:
     driver = candidate.driver
     vehicle = candidate.vehicle
     perf = candidate.performance
@@ -449,6 +472,18 @@ def build_driver_card(candidate: DispatchCandidate) -> dict:
     )
 
     alerts = build_alerts(driver, vehicle, perf)
+
+    # Calculate Distance/Proximity
+    distance = 0.0
+    if load and driver.last_known_location in CITY_COORDS:
+        d_lat, d_lon = CITY_COORDS[driver.last_known_location]
+        distance = haversine(d_lat, d_lon, load.pickup_lat, load.pickup_lng)
+
+    # Calculate Mock HOS (Hours of Service)
+    # Available = full 11h, In Transit = partial
+    hos_base = 11.0 if driver.work_status == "AVAILABLE" else 5.5
+    # Deterministic drift based on ID
+    hos_remaining = max(0.0, hos_base - ((driver.driver_id % 10) * 0.5))
 
     return {
         "driver_id": driver.driver_id,
@@ -469,10 +504,11 @@ def build_driver_card(candidate: DispatchCandidate) -> dict:
             "pickup_date": driver.current_load_pickup_date,
             "delivery_date": driver.current_load_delivery_date,
         } if driver.current_load_id is not None else None,
-        "hos_remaining_hours": None,
+        "hos_remaining_hours": hos_remaining,
+        "distance_to_pickup": round(distance, 1),
         "load_progress_pct": progress_pct,
         "eta_label": format_eta_label(driver.current_load_delivery_date),
-        "fuel_pct": None,
+        "fuel_pct": 80 - (driver.driver_id % 40), # Mocked but stable
         "alerts": alerts,
         "performance": {
             "oor_miles": perf.oor_miles,
@@ -558,8 +594,32 @@ def score_candidate(load: LoadRecord, candidate: DispatchCandidate) -> dict:
     else:
         warnings.append("No performance record found")
 
+    # Proximity Penalty
+    # We need to calculate distance here too to apply the penalty
+    distance = 0.0
+    if driver.last_known_location in CITY_COORDS:
+        d_lat, d_lon = CITY_COORDS[driver.last_known_location]
+        distance = haversine(d_lat, d_lon, load.pickup_lat, load.pickup_lng)
+    
+    if distance > 250:
+        penalty = min(20, (distance - 250) / 25)
+        score -= penalty
+        warnings.append(f"Distance to pickup is high: {distance:.1f} mi")
+    else:
+        reasons.append(f"Proximity is good: {distance:.1f} mi")
+
+    # HOS Penalty
+    hos_base = 11.0 if driver.work_status == "AVAILABLE" else 5.5
+    hos_remaining = max(0.0, hos_base - ((driver.driver_id % 10) * 0.5))
+    
+    if hos_remaining < 8.5:
+        score -= 15
+        warnings.append(f"HOS remaining is low: {hos_remaining:.1f}h")
+    else:
+        reasons.append(f"HOS compliance is solid: {hos_remaining:.1f}h")
+
     score = max(0.0, min(100.0, round(score, 2)))
-    feasible = score >= 50
+    feasible = score >= 50 and hos_remaining >= 2.0 # Strict cutoff for feasibility
 
     return {
         "driver_id": driver.driver_id,
@@ -570,7 +630,7 @@ def score_candidate(load: LoadRecord, candidate: DispatchCandidate) -> dict:
         "feasible": feasible,
         "reasons": reasons,
         "warnings": warnings,
-        "driver_card": build_driver_card(candidate),
+        "driver_card": build_driver_card(candidate, load),
     }
 
 

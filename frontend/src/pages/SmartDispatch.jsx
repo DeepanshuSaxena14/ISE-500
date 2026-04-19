@@ -117,11 +117,10 @@ function DriverCard({ driver, rank, selected, onClick, aiResult, loading }) {
 
         {/* Stats row */}
         <div className="flex gap-2 mb-3 flex-wrap">
-          <StatPill label="Sched. Mi" value={driver.scheduleMiles != null ? `${driver.scheduleMiles} mi` : 'N/A'} />
-          <StatPill label="Actual Mi" value={driver.actualMiles != null ? `${driver.actualMiles} mi` : 'N/A'} warn={driver.actualMiles > driver.scheduleMiles * 1.1} />
+          <StatPill label="HOS left" value={driver.hosRemaining != null ? `${driver.hosRemaining}h` : 'N/A'} warn={driver.hosRemaining < 8.5} />
+          <StatPill label="To pickup" value={driver.distanceToPickup != null ? `${driver.distanceToPickup}mi` : 'N/A'} />
+          <StatPill label="Fuel" value={driver.fuelLevel != null ? `${driver.fuelLevel}%` : 'N/A'} warn={driver.fuelLevel < 40} />
           <StatPill label="OOR Mi" value={driver.oorMiles != null ? `${driver.oorMiles} mi` : 'N/A'} warn={driver.oorMiles > driver.scheduleMiles * 0.05} />
-          <StatPill label="Sched. Time" value={driver.scheduleTime != null ? `${driver.scheduleTime} min` : 'N/A'} />
-          <StatPill label="Actual Time" value={driver.actualTime != null ? `${driver.actualTime} min` : 'N/A'} warn={driver.actualTime > driver.scheduleTime * 1.1} />
         </div>
 
         {/* Alerts bar */}
@@ -216,6 +215,9 @@ export default function SmartDispatch() {
         truckId: r.vehicle_no,
         status: r.driver_card.status_label,
         alerts: r.driver_card.alerts || [],
+        hosRemaining: r.driver_card.hos_remaining_hours,
+        distanceToPickup: r.driver_card.distance_to_pickup,
+        fuelLevel: r.driver_card.fuel_pct,
         oorMiles: r.driver_card.performance ? r.driver_card.performance.oor_miles : null,
         scheduleMiles: r.driver_card.performance ? r.driver_card.performance.schedule_miles : null,
         actualMiles: r.driver_card.performance ? r.driver_card.performance.actual_miles : null,
@@ -412,11 +414,12 @@ export default function SmartDispatch() {
               <div className="space-y-2 mb-4">
                 {[
                   ["Status", selectedInfo.status || 'Unknown'],
+                  ["Distance to Pickup", selectedInfo.distanceToPickup != null ? `${selectedInfo.distanceToPickup} mi` : 'N/A'],
+                  ["HOS Available", selectedInfo.hosRemaining != null ? `${selectedInfo.hosRemaining}h` : 'N/A'],
+                  ["Fuel Level", selectedInfo.fuelLevel != null ? `${selectedInfo.fuelLevel}%` : 'N/A'],
                   ["Scheduled Miles", selectedInfo.scheduleMiles != null ? `${selectedInfo.scheduleMiles} mi` : 'N/A'],
                   ["Actual Miles", selectedInfo.actualMiles != null ? `${selectedInfo.actualMiles} mi` : 'N/A'],
                   ["Out-of-Route Miles", selectedInfo.oorMiles != null ? `${selectedInfo.oorMiles} mi` : 'N/A'],
-                  ["Scheduled Time", selectedInfo.scheduleTime != null ? `${selectedInfo.scheduleTime} min` : 'N/A'],
-                  ["Actual Time", selectedInfo.actualTime != null ? `${selectedInfo.actualTime} min` : 'N/A'],
                 ].map(([label, val]) => (
                   <div key={label} className="flex justify-between text-[11px]">
                     <span className="text-white/40">{label}</span>
