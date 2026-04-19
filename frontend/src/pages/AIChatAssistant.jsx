@@ -291,15 +291,7 @@ export default function AIChatAssistant() {
     const newHistory = [...conversationHistory, { role: "user", content: userText }];
 
     try {
-      const AI_URL = import.meta.env.VITE_AI_URL || "http://localhost:5001";
-      const response = await fetch(`${AI_URL}/api/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: userText, history: newHistory })
-      });
-
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Failed to communicate with AI layer");
+      const data = await chatService.sendMessage(userText, newHistory);
 
       const rawAnswer = data.answer || "I'm having trouble retrieving that information.";
       const intentHeadline = data.intent ? data.intent.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : "Chat Response";

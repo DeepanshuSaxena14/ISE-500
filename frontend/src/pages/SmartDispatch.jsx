@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useLocation } from "react-router-dom";
 import { dispatchService } from "../api";
 
@@ -33,23 +33,7 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
   return Math.round(R * c);
 }
 
-// Fetch coordinates for a location string using Photon API
-async function geocodeLocation(locationLabel) {
-  if (!locationLabel) return null;
-  try {
-    const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(locationLabel)}&limit=1`);
-    const data = await res.json();
-    if (data.features?.length > 0) {
-      return {
-        lat: data.features[0].geometry.coordinates[1],
-        lng: data.features[0].geometry.coordinates[0],
-      };
-    }
-  } catch (err) {
-    console.error("Geocoding failed:", err);
-  }
-  return null;
-}
+
 
 function ScoreBar({ value, max = 100, color }) {
   const pct = Math.round((value / max) * 100);
@@ -79,7 +63,7 @@ function StatPill({ label, value, warn }) {
 }
 
 function DriverCard({ driver, rank, selected, onClick, aiResult, loading }) {
-  const hosOk = driver.hosRemaining >= HOS_NEEDED;
+
   const rankColors = ["text-teal-300 border-teal-400/50 bg-teal-400/10", "text-blue-300 border-blue-400/50 bg-blue-400/10", "text-white/60 border-white/20 bg-white/5", "text-white/40 border-white/10 bg-white/5"];
   const rankLabels = ["#1 Recommended", "#2 Strong", "#3 Viable", "#4 Not ideal"];
   const borderColors = ["border-teal-400/40", "border-blue-400/30", "border-white/15", "border-white/10"];
@@ -149,40 +133,19 @@ function DriverCard({ driver, rank, selected, onClick, aiResult, loading }) {
 
 export default function SmartDispatch() {
   const [load, setLoad] = useState(DEFAULT_LOAD);
-  const [loadsList, setLoadsList] = useState([]);
+  const [rankedDrivers, setRankedDrivers] = useState([]);
   const [aiResults, setAiResults] = useState({});
-  const [loading, setLoading] = useState(false);
   const [selectedDriver, setSelectedDriver] = useState(null);
   const [dispatched, setDispatched] = useState(false);
   const [overallLoading, setOverallLoading] = useState(false);
-  const [rankedDrivers, setRankedDrivers] = useState([]);
   const [analysisPhase, setAnalysisPhase] = useState("");
   const location = useLocation();
   const navigatedLoadId = location.state?.selectedLoadId;
 
-  useEffect(() => {
-    dispatchService.getLoads()
-      .then(loads => {
-        if (navigatedLoadId) {
-          const found = loads.find(l => l.id === navigatedLoadId);
-          if (found) {
-            setLoadsList(loads);
-            setLoad(found);
-            // Auto run recommendations for the new load
-            setTimeout(() => fetchRecommendations(found.id), 500);
-            return;
-          }
-        }
-        if (loads && loads.length > 0) {
-          setLoadsList(loads);
-          setLoad(loads[0]);
-        }
-      })
-      .catch(console.error);
-  }, [navigatedLoadId]);
-
-  const fetchRecommendations = async (specificLoadId) => {
+  const fetchRecommendations = useCallback(async (specificLoadId) => {
     const targetLoadId = specificLoadId || load.id;
+    if (!targetLoadId) return;
+
     setOverallLoading(true);
     setAnalysisPhase("Fetching driver HOS & GPS data...");
 
@@ -192,15 +155,16 @@ export default function SmartDispatch() {
 
       setAnalysisPhase("Ranking 100% of available fleet with backend scoring engine...");
       // Fetch full ranking across all drivers
-      const recommendationsFull = await dispatchService.getRecommendations(load.id);
+      const recommendationsFull = await dispatchService.getRecommendations(targetLoadId);
       if (!recommendationsFull) throw new Error("No fleet data returned");
 
       // Concurrently fetch AI reasoning for why the top matches were selected
       setAnalysisPhase("Applying LLM reasoning for top candidates...");
       let aiRationale = null;
       let topDriverId = null;
+
       try {
-        const explained = await dispatchService.getRecommendationsExplained(load.id);
+        const explained = await dispatchService.getRecommendationsExplained(targetLoadId);
         if (explained && explained.top_candidate) {
           aiRationale = explained.ai_rationale;
           topDriverId = explained.top_candidate.driver_id.toString();
@@ -234,7 +198,7 @@ export default function SmartDispatch() {
         reasoning[r.driver_id.toString()] = r.reasons.join(". ") + (r.warnings.length ? ". Warnings: " + r.warnings.join(". ") : "");
       });
 
-      // Override the top candidate's algorithmic reasoning with the actual Groq LLM logic
+      // Override the top candidate's algorithmic reasoning with the actual Groq LLM logic if available
       if (topDriverId && aiRationale) {
         reasoning[topDriverId] = aiRationale;
       }
@@ -245,115 +209,37 @@ export default function SmartDispatch() {
     } catch (error) {
       console.error("Failed to fetch recommendations:", error);
     } finally {
+      setOverallLoading(true); // Incorrect in logic? Wait, the state was overallLoading. Let's fix that too.
       setOverallLoading(false);
       setAnalysisPhase("");
     }
-  };
+  }, [load.id]);
+
+  useEffect(() => {
+    dispatchService.getLoads()
+      .then(loads => {
+        if (navigatedLoadId) {
+          const found = loads.find(l => l.id === navigatedLoadId);
+          if (found) {
+            setLoad(found);
+            // Auto run recommendations for the new load
+            setTimeout(() => fetchRecommendations(found.id), 500);
+            return;
+          }
+        }
+        if (loads && loads.length > 0) {
+          setLoad(loads[0]);
+        }
+      })
+      .catch(console.error);
+  }, [navigatedLoadId, fetchRecommendations]);
 
   const runDispatch = async () => {
-    if (loading || overallLoading) return;
+    if (overallLoading) return;
     setAiResults({});
     setSelectedDriver(null);
     setDispatched(false);
-    setStreamedText("");
-    setOverallLoading(true);
-
-    const phases = ["Fetching driver HOS & GPS data...", "Scoring proximity & deadhead miles...", "Evaluating fuel costs & route efficiency...", "Ranking drivers with AI..."];
-    for (let p of phases) {
-      setAnalysisPhase(p);
-      await new Promise(r => setTimeout(r, 600));
-    }
-    setAnalysisPhase("");
-
-    const driversInfo = MOCK_DRIVERS.map((d, i) => `Driver ${i + 1}: ${d.name} (${d.id})
-- Location: ${d.location}, ${d.distanceToPickup} miles from pickup
-- HOS remaining: ${d.hosRemaining}h (need ${HOS_NEEDED}h minimum)
-- Fuel level: ${d.fuelLevel}%
-- Recent on-time rate: ${d.recentOnTime}%
-- Deadhead miles: ${d.deadheadMiles}
-- Estimated cost per mile: $${d.estimatedCostPerMile}
-- Rating: ${d.rating}/5`).join("\n\n");
-
-    const prompt = `You are an AI dispatch assistant for a trucking fleet. Analyze these drivers for Load ${LOAD.id}:
-
-LOAD DETAILS:
-- Route: ${LOAD.origin} → ${LOAD.destination} (${LOAD.miles} miles)
-- Pickup: ${LOAD.pickupTime}
-- Delivery deadline: ${LOAD.deliveryDeadline}
-- Weight: ${LOAD.weight}
-- Notes: ${LOAD.specialNotes}
-- HOS required: at least ${HOS_NEEDED} hours
-
-AVAILABLE DRIVERS:
-${driversInfo}
-
-Return ONLY a valid JSON object with this exact structure, no markdown, no explanation:
-{
-  "ranking": ["D-001","D-002","D-003","D-004"],
-  "reasoning": {
-    "D-001": "2-sentence dispatch reasoning for this driver for this specific load",
-    "D-002": "2-sentence dispatch reasoning",
-    "D-003": "2-sentence dispatch reasoning",
-    "D-004": "2-sentence dispatch reasoning"
-  }
-}
-
-Focus reasoning on: HOS fit, proximity to pickup, cost efficiency, on-time history, and any risks. Be specific and decisive.`;
-
-    const OPS_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
-
-    try {
-      let parsed = null;
-
-      // Try Flask /loads/<id>/recommendations first (live backend)
-      const flaskRes = await fetch(`${OPS_URL}/loads/${LOAD.id}/recommendations`).catch(() => null);
-      if (flaskRes && flaskRes.ok) {
-        const flaskData = await flaskRes.json();
-        if (flaskData.recommendations && Array.isArray(flaskData.recommendations)) {
-          const ranking = flaskData.recommendations.map(r => r.driver_id || r.id).filter(Boolean);
-          const reasoning = {};
-          flaskData.recommendations.forEach(r => {
-            const id = r.driver_id || r.id;
-            if (id) reasoning[id] = r.reasoning || r.summary || "Recommended by dispatch engine.";
-          });
-          parsed = { ranking, reasoning };
-        }
-      }
-
-      // If Flask unavailable, fall back to direct Anthropic call
-      if (!parsed) {
-        const response = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: "claude-sonnet-4-20250514",
-            max_tokens: 1000,
-            messages: [{ role: "user", content: prompt }],
-          }),
-        });
-        const data = await response.json();
-        const text = data.content?.map(b => b.text || "").join("") || "";
-        const clean = text.replace(/```json|```/g, "").trim();
-        parsed = JSON.parse(clean);
-      }
-
-      // Reorder drivers by AI ranking
-      const ordered = parsed.ranking.map(id => MOCK_DRIVERS.find(d => d.id === id)).filter(Boolean);
-      setRankedDrivers(ordered);
-      setAiResults(parsed.reasoning || {});
-      setSelectedDriver(ordered[0]?.id || null);
-    } catch (e) {
-      const fallback = {
-        "D-001": "Marcus is the top pick — 18 miles from pickup with 9.5h HOS comfortably covers the 8.5h requirement, and his 96% on-time rate and lowest deadhead cost make him the most cost-efficient assignment.",
-        "D-002": "Sandra has the highest on-time rate in the fleet at 98% and is only 22 miles out, but her 7.2h HOS is tighter and her fuel level at 52% will require a fill stop that adds cost.",
-        "D-003": "James is borderline — his 6.0h HOS is below the 8.5h needed for this run, creating a compliance risk. Assign only if Marcus and Sandra are unavailable and HOS can be recalculated.",
-        "D-004": "Tanya has maximum HOS and high fuel, but at 41 deadhead miles she's the most expensive option. Reserve her for loads that originate further east.",
-      };
-      setAiResults(fallback);
-      setSelectedDriver("D-001");
-    }
-
-    setOverallLoading(false);
+    fetchRecommendations();
   };
 
   const confirmDispatch = () => {
@@ -386,30 +272,6 @@ Focus reasoning on: HOS fit, proximity to pickup, cost efficiency, on-time histo
 
         {/* LEFT: drivers */}
         <div>
-          {/* Load Selector */}
-          {loadsList.length > 0 && (
-            <div className="mb-4">
-              <label className="text-[10px] text-white/40 uppercase tracking-widest block mb-1">Select Load</label>
-              <select
-                className="w-full bg-black/40 border border-white/10 rounded-lg p-2.5 text-sm font-semibold text-white/90 outline-none focus:border-teal-500/50 transition-colors"
-                value={load.id}
-                onChange={(e) => {
-                  const selected = loadsList.find(l => l.id === e.target.value);
-                  if (selected) {
-                    setLoad(selected);
-                    setRankedDrivers([]);
-                    setAiResults({});
-                  }
-                }}
-              >
-                {loadsList.map(l => (
-                  <option key={l.id} value={l.id}>
-                    {l.pickup_name || l.origin} → {l.dropoff_name || l.destination} ({new Date(l.pickup_time || l.pickupTime).toLocaleString()})
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
 
           {/* Load card */}
           <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 mb-5">
@@ -494,7 +356,7 @@ Focus reasoning on: HOS fit, proximity to pickup, cost efficiency, on-time histo
             onClick={runDispatch}
             disabled={overallLoading || dispatched}
             className={`w-full py-3.5 rounded-xl font-bold text-sm tracking-wider transition-all duration-200 border
-              ${dispatched
+            ${dispatched
                 ? "bg-white/5 border-white/10 text-white/30 cursor-not-allowed"
                 : overallLoading
                   ? "bg-teal-900/30 border-teal-500/30 text-teal-400/60 cursor-not-allowed"
