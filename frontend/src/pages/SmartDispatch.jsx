@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { useLocation } from "react-router-dom";
 import { dispatchService } from "../api";
 
 const DEFAULT_LOAD = {
@@ -17,46 +18,22 @@ const DEFAULT_LOAD = {
   specialNotes: "Liftgate required. No-touch freight.",
 };
 
-const MOCK_DRIVERS = [
-  {
-    id: "D-001", name: "Marcus Rivera", avatar: "MR",
-    location: "Mesa, AZ", distanceToPickup: 18,
-    hosRemaining: 9.5, hosStatus: "Available",
-    lastLoad: "Tucson → Phoenix", truckId: "TRK-114",
-    fuelLevel: 78, rating: 4.8, totalMiles: 312000,
-    recentOnTime: 96, deadheadMiles: 18,
-    estimatedCostPerMile: 2.61, estimatedFuelCost: 198,
-  },
-  {
-    id: "D-002", name: "Sandra Kim", avatar: "SK",
-    location: "Tempe, AZ", distanceToPickup: 22,
-    hosRemaining: 7.2, hosStatus: "Available",
-    lastLoad: "Flagstaff → Tempe", truckId: "TRK-089",
-    fuelLevel: 52, rating: 4.9, totalMiles: 287000,
-    recentOnTime: 98, deadheadMiles: 22,
-    estimatedCostPerMile: 2.68, estimatedFuelCost: 211,
-  },
-  {
-    id: "D-003", name: "James Okafor", avatar: "JO",
-    location: "Chandler, AZ", distanceToPickup: 31,
-    hosRemaining: 6.0, hosStatus: "At Risk",
-    lastLoad: "Albuquerque → Chandler", truckId: "TRK-201",
-    fuelLevel: 34, rating: 4.5, totalMiles: 198000,
-    recentOnTime: 88, deadheadMiles: 31,
-    estimatedCostPerMile: 2.74, estimatedFuelCost: 228,
-  },
-  {
-    id: "D-004", name: "Tanya Reyes", avatar: "TR",
-    location: "Gilbert, AZ", distanceToPickup: 41,
-    hosRemaining: 10.0, hosStatus: "Available",
-    lastLoad: "Tucson → Gilbert", truckId: "TRK-177",
-    fuelLevel: 91, rating: 4.7, totalMiles: 254000,
-    recentOnTime: 93, deadheadMiles: 41,
-    estimatedCostPerMile: 2.79, estimatedFuelCost: 245,
-  },
-];
 
 const HOS_NEEDED = 8.5;
+
+// Haversine formula to calculate miles between two coordinates
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 3958.8; // Radius of the Earth in miles
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(R * c);
+}
+
+
 
 function ScoreBar({ value, max = 100, color }) {
   const pct = Math.round((value / max) * 100);
@@ -86,7 +63,7 @@ function StatPill({ label, value, warn }) {
 }
 
 function DriverCard({ driver, rank, selected, onClick, aiResult, loading }) {
-  const hosOk = driver.hosRemaining >= HOS_NEEDED;
+
   const rankColors = ["text-teal-300 border-teal-400/50 bg-teal-400/10", "text-blue-300 border-blue-400/50 bg-blue-400/10", "text-white/60 border-white/20 bg-white/5", "text-white/40 border-white/10 bg-white/5"];
   const rankLabels = ["#1 Recommended", "#2 Strong", "#3 Viable", "#4 Not ideal"];
   const borderColors = ["border-teal-400/40", "border-blue-400/30", "border-white/15", "border-white/10"];
@@ -141,8 +118,8 @@ function DriverCard({ driver, rank, selected, onClick, aiResult, loading }) {
           {loading ? (
             <div className="flex items-center gap-2">
               <div className="flex gap-1">
-                {[0,1,2].map(i => (
-                  <div key={i} className="w-1.5 h-1.5 rounded-full bg-teal-400/60 animate-bounce" style={{animationDelay:`${i*0.15}s`}} />
+                {[0, 1, 2].map(i => (
+                  <div key={i} className="w-1.5 h-1.5 rounded-full bg-teal-400/60 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
                 ))}
               </div>
               <span className="text-[11px] text-white/30">Analyzing driver profile...</span>
@@ -160,53 +137,46 @@ function DriverCard({ driver, rank, selected, onClick, aiResult, loading }) {
 
 export default function SmartDispatch() {
   const [load, setLoad] = useState(DEFAULT_LOAD);
-  const [loadsList, setLoadsList] = useState([]);
+  const [rankedDrivers, setRankedDrivers] = useState([]);
   const [aiResults, setAiResults] = useState({});
-  const [loading, setLoading] = useState(false);
   const [selectedDriver, setSelectedDriver] = useState(null);
   const [dispatched, setDispatched] = useState(false);
   const [overallLoading, setOverallLoading] = useState(false);
-  const [rankedDrivers, setRankedDrivers] = useState([]);
   const [analysisPhase, setAnalysisPhase] = useState("");
+  const location = useLocation();
+  const navigatedLoadId = location.state?.selectedLoadId;
 
-  useEffect(() => {
-    dispatchService.getLoads()
-      .then(loads => {
-        if (loads && loads.length > 0) {
-          setLoadsList(loads);
-          setLoad(loads[0]);
-        }
-      })
-      .catch(console.error);
-  }, []);
+  const fetchRecommendations = useCallback(async (specificLoadId) => {
+    const targetLoadId = specificLoadId || load.id;
+    if (!targetLoadId) return;
 
-  const fetchRecommendations = async () => {
     setOverallLoading(true);
     setAnalysisPhase("Fetching driver HOS & GPS data...");
-    
+
     try {
       setAnalysisPhase("Scoring proximity & route efficiency...");
       await new Promise(r => setTimeout(r, 800)); // Visual feedback
 
       setAnalysisPhase("Ranking 100% of available fleet with backend scoring engine...");
       // Fetch full ranking across all drivers
-      const recommendationsFull = await dispatchService.getRecommendations(load.id);
+      const recommendationsFull = await dispatchService.getRecommendations(targetLoadId);
       if (!recommendationsFull) throw new Error("No fleet data returned");
-      
+
       // Concurrently fetch AI reasoning for why the top matches were selected
       setAnalysisPhase("Applying LLM reasoning for top candidates...");
       let aiRationale = null;
       let topDriverId = null;
+
       try {
-        const explained = await dispatchService.getRecommendationsExplained(load.id);
+        const explained = await dispatchService.getRecommendationsExplained(targetLoadId);
         if (explained && explained.top_candidate) {
           aiRationale = explained.ai_rationale;
           topDriverId = explained.top_candidate.driver_id.toString();
         }
-      } catch(err) {
+      } catch (err) {
         console.warn("AI generation error handled:", err);
       }
-      
+
       const mappedDrivers = recommendationsFull.map(r => ({
         id: r.driver_id.toString(),
         name: r.driver_name,
@@ -232,7 +202,7 @@ export default function SmartDispatch() {
         reasoning[r.driver_id.toString()] = r.reasons.join(". ") + (r.warnings.length ? ". Warnings: " + r.warnings.join(". ") : "");
       });
 
-      // Override the top candidate's algorithmic reasoning with the actual Groq LLM logic
+      // Override the top candidate's algorithmic reasoning with the actual Groq LLM logic if available
       if (topDriverId && aiRationale) {
         reasoning[topDriverId] = aiRationale;
       }
@@ -243,13 +213,33 @@ export default function SmartDispatch() {
     } catch (error) {
       console.error("Failed to fetch recommendations:", error);
     } finally {
+      setOverallLoading(true); // Incorrect in logic? Wait, the state was overallLoading. Let's fix that too.
       setOverallLoading(false);
       setAnalysisPhase("");
     }
-  };
+  }, [load.id]);
+
+  useEffect(() => {
+    dispatchService.getLoads()
+      .then(loads => {
+        if (navigatedLoadId) {
+          const found = loads.find(l => l.id === navigatedLoadId);
+          if (found) {
+            setLoad(found);
+            // Auto run recommendations for the new load
+            setTimeout(() => fetchRecommendations(found.id), 500);
+            return;
+          }
+        }
+        if (loads && loads.length > 0) {
+          setLoad(loads[0]);
+        }
+      })
+      .catch(console.error);
+  }, [navigatedLoadId, fetchRecommendations]);
 
   const runDispatch = async () => {
-    if (loading || overallLoading) return;
+    if (overallLoading) return;
     setAiResults({});
     setSelectedDriver(null);
     setDispatched(false);
@@ -265,6 +255,13 @@ export default function SmartDispatch() {
   const selectedRank = rankedDrivers.findIndex(d => d.id === selectedDriver);
   const hasResults = Object.keys(aiResults).length > 0;
 
+  const actualMiles = (load.pickup_lat && load.dropoff_lat)
+    ? calculateDistance(load.pickup_lat, load.pickup_lng, load.dropoff_lat, load.dropoff_lng)
+    : (load.miles || 850);
+
+  const ratePerMile = 2.25;
+  const actualRate = (actualMiles * ratePerMile).toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 });
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
@@ -279,30 +276,6 @@ export default function SmartDispatch() {
 
         {/* LEFT: drivers */}
         <div>
-          {/* Load Selector */}
-          {loadsList.length > 0 && (
-            <div className="mb-4">
-              <label className="text-[10px] text-white/40 uppercase tracking-widest block mb-1">Select Load</label>
-              <select 
-                className="w-full bg-black/40 border border-white/10 rounded-lg p-2.5 text-sm font-semibold text-white/90 outline-none focus:border-teal-500/50 transition-colors"
-                value={load.id}
-                onChange={(e) => {
-                  const selected = loadsList.find(l => l.id === e.target.value);
-                  if (selected) {
-                    setLoad(selected);
-                    setRankedDrivers([]);
-                    setAiResults({});
-                  }
-                }}
-              >
-                {loadsList.map(l => (
-                  <option key={l.id} value={l.id}>
-                    {l.pickup_name || l.origin} → {l.dropoff_name || l.destination} ({new Date(l.pickup_time || l.pickupTime).toLocaleString()})
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
 
           {/* Load card */}
           <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 mb-5">
@@ -319,7 +292,7 @@ export default function SmartDispatch() {
                   </span>
                   <div className="flex-1 flex items-center gap-1 px-2">
                     <div className="flex-1 h-px bg-white/20" />
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6h8M7 3l3 3-3 3" stroke="white" strokeOpacity=".5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6h8M7 3l3 3-3 3" stroke="white" strokeOpacity=".5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
                     <div className="flex-1 h-px bg-white/20" />
                   </div>
                   <span className="text-xl font-bold text-white tracking-tight">
@@ -329,15 +302,15 @@ export default function SmartDispatch() {
                 <div className="text-[11px] text-white/40 mt-0.5">{load.origin || load.pickup_name || 'N/A'} → {load.destination || load.dropoff_name || 'N/A'}</div>
               </div>
               <div className="text-right">
-                <div className="text-xl font-bold text-teal-300">{load.rate || '$2,450'}</div>
-                <div className="text-[11px] text-white/40">{load.ratePerMile || '$2.25'}/mi</div>
+                <div className="text-xl font-bold text-teal-300">{actualRate}</div>
+                <div className="text-[11px] text-white/40">${ratePerMile.toFixed(2)}/mi</div>
               </div>
             </div>
             <div className="grid grid-cols-4 gap-3 pt-3 border-t border-white/8">
               {[
-                ["Distance", `${load.miles || 850} mi`],
-                ["Pickup", load.pickupTime || load.pickup_time],
-                ["Deadline", load.deliveryDeadline || load.dropoff_time],
+                ["Distance", `${actualMiles} mi`],
+                ["Pickup", new Date(load.pickupTime || load.pickup_time).toLocaleString()],
+                ["Deadline", new Date(load.deliveryDeadline || load.dropoff_time).toLocaleString()],
                 ["Weight", load.weight || '42,000 lbs'],
               ].map(([label, val]) => (
                 <div key={label}>
@@ -355,8 +328,8 @@ export default function SmartDispatch() {
           {overallLoading && (
             <div className="rounded-xl border border-teal-500/30 bg-teal-900/10 px-5 py-4 mb-4 flex items-center gap-3">
               <div className="flex gap-1 flex-shrink-0">
-                {[0,1,2,3].map(i => (
-                  <div key={i} className="w-1 h-4 bg-teal-400/70 rounded-full animate-bounce" style={{animationDelay:`${i*0.1}s`}} />
+                {[0, 1, 2, 3].map(i => (
+                  <div key={i} className="w-1 h-4 bg-teal-400/70 rounded-full animate-bounce" style={{ animationDelay: `${i * 0.1}s` }} />
                 ))}
               </div>
               <div>
@@ -390,7 +363,7 @@ export default function SmartDispatch() {
             onClick={runDispatch}
             disabled={overallLoading || dispatched}
             className={`w-full py-3.5 rounded-xl font-bold text-sm tracking-wider transition-all duration-200 border
-              ${dispatched
+            ${dispatched
                 ? "bg-white/5 border-white/10 text-white/30 cursor-not-allowed"
                 : overallLoading
                   ? "bg-teal-900/30 border-teal-500/30 text-teal-400/60 cursor-not-allowed"
@@ -449,15 +422,15 @@ export default function SmartDispatch() {
             <div className="rounded-xl border border-teal-400/40 bg-teal-900/20 p-4">
               <div className="flex items-center gap-2 mb-3">
                 <div className="w-5 h-5 rounded-full bg-teal-400 flex items-center justify-center flex-shrink-0">
-                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 2.5" stroke="black" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 2.5" stroke="black" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
                 </div>
                 <span className="text-sm font-bold text-teal-300">Load Assigned</span>
               </div>
               <p className="text-[11px] text-teal-300/70 leading-relaxed">
-                {LOAD.id} dispatched to <strong className="text-teal-200">{selectedInfo.name}</strong> ({selectedInfo.truckId}). Notification sent. ETA calculated.
+                {load.id} dispatched to <strong className="text-teal-200">{selectedInfo.name}</strong> ({selectedInfo.truckId}). Notification sent. ETA calculated.
               </p>
               <div className="mt-3 pt-3 border-t border-teal-500/20 text-[11px] text-teal-300/50">
-                Dispatched at {new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+                Dispatched at {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </div>
             </div>
           )}
@@ -493,7 +466,7 @@ export default function SmartDispatch() {
                   const scheduleSpeed = (d.scheduleTime && d.scheduleMiles) ? (d.scheduleMiles / (d.scheduleTime / 60)).toFixed(1) : 'N/A';
                   return (
                     <div key={d.id} className={`flex items-center gap-2 text-[11px] p-1.5 rounded-md transition-colors ${selectedDriver === d.id ? "bg-teal-900/20" : ""}`}>
-                      <span className={`w-4 text-center font-bold ${i === 0 ? "text-teal-400" : "text-white/30"}`}>{i+1}</span>
+                      <span className={`w-4 text-center font-bold ${i === 0 ? "text-teal-400" : "text-white/30"}`}>{i + 1}</span>
                       <span className="text-white/60 flex-1 truncate">{d.name.split(" ")[0]}</span>
                       <span className={`font-semibold ${i === 0 ? "text-teal-300" : "text-white/50"}`}>{scheduleSpeed} mph av.</span>
                       {i === 0 && <span className="text-[9px] text-teal-400 bg-teal-900/40 px-1.5 py-0.5 rounded">BEST</span>}
