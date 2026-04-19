@@ -8,5 +8,20 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
+  server: {
+    proxy: {
+      // Proxy /ops/* → Flask ops backend (port 8000) during local dev
+      '/ops': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/ops/, ''),
+      },
+      // Proxy /ai/* → Flask AI backend (port 5001) during local dev
+      '/ai': {
+        target: 'http://localhost:5001',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/ai/, ''),
+      },
+    },
+  },
 })
-
