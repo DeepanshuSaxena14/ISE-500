@@ -36,6 +36,10 @@ export const dispatchService = {
     console.warn('[dispatchService] falling back to mock recommendations');
     return mockRecommendations;
   },
+  getRecommendationsExplained: async (loadId) => {
+    if (!loadId) return null;
+    return fetchJson(`/loads/${loadId}/recommendation/explain`);
+  },
   assignLoad: async (loadId, driverId) => {
     // POST to ops backend once that endpoint exists; graceful stub for now
     console.log(`[dispatchService] assigning load ${loadId} to driver ${driverId}`);
