@@ -114,20 +114,23 @@ function DriverCard({ driver, rank, selected, onClick, aiResult, loading }) {
         </div>
 
         <div className="flex gap-2 mb-3 flex-wrap">
-          <StatPill label="HOS left" value={`${driver.hosRemaining}h`} warn={!hosOk} />
-          <StatPill label="To pickup" value={`${driver.distanceToPickup}mi`} />
-          <StatPill label="Fuel" value={`${driver.fuelLevel}%`} warn={driver.fuelLevel < 40} />
-          <StatPill label="On-time" value={`${driver.recentOnTime}%`} />
-          <StatPill label="Est. CPM" value={driver.estimatedCostPerMile.toFixed(2)} />
+          <StatPill label="Sched. Mi" value={driver.scheduleMiles != null ? `${driver.scheduleMiles} mi` : 'N/A'} />
+          <StatPill label="Actual Mi" value={driver.actualMiles != null ? `${driver.actualMiles} mi` : 'N/A'} warn={driver.actualMiles > driver.scheduleMiles * 1.1} />
+          <StatPill label="OOR Mi" value={driver.oorMiles != null ? `${driver.oorMiles} mi` : 'N/A'} warn={driver.oorMiles > driver.scheduleMiles * 0.05} />
+          <StatPill label="Sched. Time" value={driver.scheduleTime != null ? `${driver.scheduleTime} min` : 'N/A'} />
+          <StatPill label="Actual Time" value={driver.actualTime != null ? `${driver.actualTime} min` : 'N/A'} warn={driver.actualTime > driver.scheduleTime * 1.1} />
         </div>
 
-        <div className="mb-3">
-          <div className="flex justify-between text-[10px] text-white/40 mb-1">
-            <span>HOS available</span>
-            <span className={!hosOk ? "text-amber-400" : "text-teal-400"}>{driver.hosRemaining}h of {HOS_NEEDED}h needed</span>
+        {/* Alerts bar */}
+        {driver.alerts && driver.alerts.length > 0 && (
+          <div className="mb-3 space-y-1">
+            {driver.alerts.map((alert, idx) => (
+              <div key={idx} className={`text-[10px] px-2 py-1 rounded border ${alert.severity === 'high' ? 'bg-red-500/20 border-red-500/40 text-red-200' : alert.severity === 'medium' ? 'bg-amber-500/20 border-amber-500/40 text-amber-200' : 'bg-blue-500/20 border-blue-500/40 text-blue-200'}`}>
+                ⚠ {alert.text}
+              </div>
+            ))}
           </div>
-          <ScoreBar value={driver.hosRemaining} max={11} color={!hosOk ? "amber" : "teal"} />
-        </div>
+        )}
 
         <div className={`rounded-lg border p-3 mt-2 transition-all duration-300 min-h-[56px]
           ${selected ? "border-teal-500/30 bg-teal-900/20" : "border-white/8 bg-black/20"}`}>
@@ -182,37 +185,48 @@ export default function SmartDispatch() {
       setAnalysisPhase("Scoring proximity & route efficiency...");
       await new Promise(r => setTimeout(r, 800)); // Visual feedback
 
-      setAnalysisPhase("Ranking drivers with backend AI...");
-      const explained = await dispatchService.getRecommendationsExplained(load.id);
-      if (!explained) throw new Error("No data returned");
+      setAnalysisPhase("Ranking 100% of available fleet with backend scoring engine...");
+      // Fetch full ranking across all drivers
+      const recommendationsFull = await dispatchService.getRecommendations(load.id);
+      if (!recommendationsFull) throw new Error("No fleet data returned");
 
-      const recommendations = [explained.top_candidate, ...(explained.runner_ups || [])];
+      // Concurrently fetch AI reasoning for why the top matches were selected
+      setAnalysisPhase("Applying LLM reasoning for top candidates...");
+      let aiRationale = null;
+      let topDriverId = null;
+      try {
+        const explained = await dispatchService.getRecommendationsExplained(load.id);
+        if (explained && explained.top_candidate) {
+          aiRationale = explained.ai_rationale;
+          topDriverId = explained.top_candidate.driver_id.toString();
+        }
+      } catch (err) {
+        console.warn("AI generation error handled:", err);
+      }
 
-      const mappedDrivers = recommendations.map(r => ({
+      const mappedDrivers = recommendationsFull.map(r => ({
         id: r.driver_id.toString(),
         name: r.driver_name,
-        avatar: r.driver_name.split(' ').map(n => n[0]).join(''),
+        avatar: r.driver_name.split(' ').map(n => n[0] || '').join(''),
         location: r.driver_card.location_label,
-        distanceToPickup: 25, // Mocked 
-        hosRemaining: r.driver_card.performance ? parseFloat((r.driver_card.performance.schedule_time / 60).toFixed(1)) : 10.0,
-        hosStatus: r.feasible ? "Available" : "At Risk",
         truckId: r.vehicle_no,
-        fuelLevel: r.driver_card.fuel_pct || 80,
-        rating: 4.8,
-        recentOnTime: 96,
-        deadheadMiles: 25,
-        estimatedCostPerMile: r.driver_card.performance ? (r.driver_card.performance.actual_miles / r.driver_card.performance.actual_time * 60) : 2.65,
-        estimatedFuelCost: 150
+        status: r.driver_card.status_label,
+        alerts: r.driver_card.alerts || [],
+        oorMiles: r.driver_card.performance ? r.driver_card.performance.oor_miles : null,
+        scheduleMiles: r.driver_card.performance ? r.driver_card.performance.schedule_miles : null,
+        actualMiles: r.driver_card.performance ? r.driver_card.performance.actual_miles : null,
+        scheduleTime: r.driver_card.performance ? r.driver_card.performance.schedule_time : null,
+        actualTime: r.driver_card.performance ? r.driver_card.performance.actual_time : null,
       }));
 
       const reasoning = {};
-      recommendations.forEach(r => {
-        reasoning[r.driver_id.toString()] = r.reasons.join(". ") + ". " + r.warnings.join(". ");
+      recommendationsFull.forEach(r => {
+        reasoning[r.driver_id.toString()] = r.reasons.join(". ") + (r.warnings.length ? ". Warnings: " + r.warnings.join(". ") : "");
       });
 
-      // Override the top candidate's reasoning with the actual AI rationale
-      if (explained.top_candidate && explained.ai_rationale) {
-        reasoning[explained.top_candidate.driver_id.toString()] = explained.ai_rationale;
+      // Override the top candidate's algorithmic reasoning with the actual Groq LLM logic
+      if (topDriverId && aiRationale) {
+        reasoning[topDriverId] = aiRationale;
       }
 
       setRankedDrivers(mappedDrivers);
@@ -487,11 +501,12 @@ Focus reasoning on: HOS fit, proximity to pickup, cost efficiency, on-time histo
               </div>
               <div className="space-y-2 mb-4">
                 {[
-                  ["Deadhead miles", `${selectedInfo.deadheadMiles} mi`],
-                  ["HOS available", `${selectedInfo.hosRemaining}h`],
-                  ["Est. fuel cost", `$${selectedInfo.estimatedFuelCost}`],
-                  ["Est. CPM", `$${selectedInfo.estimatedCostPerMile.toFixed(2)}`],
-                  ["Driver rating", `${selectedInfo.rating} / 5.0`],
+                  ["Status", selectedInfo.status || 'Unknown'],
+                  ["Scheduled Miles", selectedInfo.scheduleMiles != null ? `${selectedInfo.scheduleMiles} mi` : 'N/A'],
+                  ["Actual Miles", selectedInfo.actualMiles != null ? `${selectedInfo.actualMiles} mi` : 'N/A'],
+                  ["Out-of-Route Miles", selectedInfo.oorMiles != null ? `${selectedInfo.oorMiles} mi` : 'N/A'],
+                  ["Scheduled Time", selectedInfo.scheduleTime != null ? `${selectedInfo.scheduleTime} min` : 'N/A'],
+                  ["Actual Time", selectedInfo.actualTime != null ? `${selectedInfo.actualTime} min` : 'N/A'],
                 ].map(([label, val]) => (
                   <div key={label} className="flex justify-between text-[11px]">
                     <span className="text-white/40">{label}</span>
@@ -552,18 +567,22 @@ Focus reasoning on: HOS fit, proximity to pickup, cost efficiency, on-time histo
             </div>
           </div>
 
+          {/* Performance summary */}
           {hasResults && !overallLoading && (
             <div className="rounded-xl border border-white/8 bg-white/[0.02] p-4">
-              <div className="text-[10px] text-white/30 uppercase tracking-widest mb-3">Cost Comparison</div>
+              <div className="text-[10px] text-white/30 uppercase tracking-widest mb-3">Performance Comparison</div>
               <div className="space-y-2">
-                {rankedDrivers.map((d, i) => (
-                  <div key={d.id} className={`flex items-center gap-2 text-[11px] p-1.5 rounded-md transition-colors ${selectedDriver === d.id ? "bg-teal-900/20" : ""}`}>
-                    <span className={`w-4 text-center font-bold ${i === 0 ? "text-teal-400" : "text-white/30"}`}>{i + 1}</span>
-                    <span className="text-white/60 flex-1 truncate">{d.name.split(" ")[0]}</span>
-                    <span className={`font-semibold ${i === 0 ? "text-teal-300" : "text-white/50"}`}>${d.estimatedCostPerMile.toFixed(2)}/mi</span>
-                    {i === 0 && <span className="text-[9px] text-teal-400 bg-teal-900/40 px-1.5 py-0.5 rounded">BEST</span>}
-                  </div>
-                ))}
+                {rankedDrivers.map((d, i) => {
+                  const scheduleSpeed = (d.scheduleTime && d.scheduleMiles) ? (d.scheduleMiles / (d.scheduleTime / 60)).toFixed(1) : 'N/A';
+                  return (
+                    <div key={d.id} className={`flex items-center gap-2 text-[11px] p-1.5 rounded-md transition-colors ${selectedDriver === d.id ? "bg-teal-900/20" : ""}`}>
+                      <span className={`w-4 text-center font-bold ${i === 0 ? "text-teal-400" : "text-white/30"}`}>{i + 1}</span>
+                      <span className="text-white/60 flex-1 truncate">{d.name.split(" ")[0]}</span>
+                      <span className={`font-semibold ${i === 0 ? "text-teal-300" : "text-white/50"}`}>{scheduleSpeed} mph av.</span>
+                      {i === 0 && <span className="text-[9px] text-teal-400 bg-teal-900/40 px-1.5 py-0.5 rounded">BEST</span>}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
