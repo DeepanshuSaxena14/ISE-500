@@ -1,82 +1,287 @@
-# DispatchIQ (ISE-500)
+# DispatchIQ — AI-Powered Fleet Operations Platform
 
-DispatchIQ is an AI-powered fleet operations assistant designed specifically for small trucking fleets. It acts as a copilot, combining a React frontend with a LangChain + LLM (Llama 3.1) backend to dynamically manage drivers, calculate route risks, and handle conversational analytics.
+> **GlobeHack @ ASU · ISE-500 Team**
+
+DispatchIQ is a real-time fleet management platform that helps trucking dispatchers make faster, smarter decisions using AI. It combines live driver data, AI-powered chat, voice briefings, and smart load dispatch recommendations in a single operations dashboard.
+
+**Live Demo:** https://dispatchiq-steel.vercel.app
 
 ---
 
-## Prerequisites
-Before you start, make sure you have the following installed on your machine:
-- **Node.js** (v16 or higher)
-- **Python** (v3.9 or higher)
+## What It Does
 
-## 1. Project Setup
-Clone this repository to your local machine, then follow these steps carefully to set up both environments.
+- **Fleet Dashboard** — Real-time driver cards showing location, HOS, fuel, load progress, and performance alerts
+- **AI Chat Assistant** — Ask natural language questions about your fleet ("Who can take a load from Phoenix to Dallas right now?") and get structured, ranked answers
+- **Voice Copilot** — Hands-free audio briefings powered by ElevenLabs TTS — play a fleet status summary or critical alerts while on the move
+- **Smart Dispatch** — AI-ranked driver recommendations for any new load based on HOS, location, fuel, and cost-per-mile
+- **Alerts** — Automated flagging of HOS violations, out-of-route ratios, fuel warnings, and schedule delays
 
-### Setting up the Environment Variables
-Before running the server, you need API keys to power the AI logic.
+---
 
-1. Create a file named exactly **`.env`** in the ROOT directory of this project (`ISE-500/.env`).
-2. Copy the contents of the `.env.example` file (or paste the following) into your new `.env` file:
-```env
-# ─── GROQ SETTINGS (LLM) ───
-GROQ_API_KEY="your_groq_api_key_here"
-GROQ_MODEL="llama-3.1-8b-instant"
+## Architecture
 
-# ─── BACKEND SETTINGS ───
-BACKEND_BASE_URL="http://localhost:5001/api"
 ```
-3. Replace `"your_groq_api_key_here"` with a valid Groq API Key.
+┌─────────────────────────────────────┐
+│         Vercel (Frontend)           │
+│      React + TypeScript + Vite      │
+│      dispatchiq-steel.vercel.app    │
+└────────────┬────────────┬───────────┘
+             │            │
+             ▼            ▼
+┌────────────────┐  ┌─────────────────────┐
+│  Fleet API     │  │   AI Chat Service   │
+│  Flask/Python  │  │   Flask/Python      │
+│  Port 8000     │  │   Port 5001         │
+│  Railway       │  │   Railway           │
+└────────┬───────┘  └──────────┬──────────┘
+         │                     │
+         ▼                     ▼
+┌─────────────────┐   ┌────────────────────┐
+│    Supabase     │   │   Groq (LLM)       │
+│  PostgreSQL DB  │   │   ElevenLabs (TTS) │
+│   50 drivers    │   │   LangChain        │
+└─────────────────┘   └────────────────────┘
+```
 
 ---
 
-## 2. Installation & Running
+## Tech Stack
 
-The project runs on two separate servers: a Python backend and a React/Vite frontend. You will need **two terminal windows** open.
+| Layer | Technology |
+|-------|-----------|
+| Frontend | React 18, JavaScript, Tailwind CSS, Vite |
+| Ops Backend | Flask (Python), Supabase, PostgreSQL |
+| AI Backend | Flask (Python), Groq (llama-3.1-8b-instant), LangChain |
+| Voice | ElevenLabs TTS API |
+| Database | Supabase (PostgreSQL) — 50 seeded drivers |
+| Frontend Deploy | Vercel |
+| Backend Deploy | Railway (2 services) |
+| CI/CD | GitHub Actions |
 
-### Terminal 1: Run the AI Backend
-This terminal runs the Flask server on port `5001`.
+---
+
+## Project Structure
+
+```
+ISE-500/
+├── frontend/                    # React app
+│   ├── src/
+│   │   ├── pages/
+│   │   │   ├── FleetDashboard.jsx      # Live driver cards
+│   │   │   ├── AIChatAssistant.jsx     # AI chat + voice copilot
+│   │   │   ├── SmartDispatch.jsx       # AI dispatch recommendations
+│   │   │   ├── Alerts.jsx              # Fleet alerts
+│   │   │   └── Briefings.jsx           # Ops briefing page
+│   │   ├── api/
+│   │   │   └── index.js                # API calls to both backends
+│   │   └── components/                 # Shared UI components
+│   ├── .env.example                    # Environment variable template
+│   └── vite.config.js
+│
+├── backend/                     # Python backends
+│   ├── app.py                          # Fleet ops API (port 8000)
+│   ├── chat_service.py                 # AI chat + TTS API (port 5001)
+│   ├── ai/
+│   │   ├── service.py                  # LangChain dispatch query processor
+│   │   ├── config.py                   # Environment config
+│   │   ├── handlers/                   # Intent handlers (alerts, dispatch, etc.)
+│   │   ├── providers/                  # Fleet data providers (API + mock)
+│   │   └── tools/
+│   │       ├── llm.py                  # Groq LLM wrapper
+│   │       └── tts.py                  # ElevenLabs TTS
+│   ├── data/
+│   │   ├── seed_data.py                # Seeds 50 drivers into Supabase
+│   │   └── schema.sql                  # Database schema
+│   ├── requirements.txt
+│   ├── Dockerfile                      # For Fleet API service
+│   └── Dockerfile.chat                 # For AI Chat service
+│
+└── .github/workflows/
+    ├── deploy-frontend.yml             # Vercel auto-deploy
+    └── deploy-backend.yml             # Railway deploy (manual trigger)
+```
+
+---
+
+## Running Locally
+
+### Prerequisites
+
+- Node.js 18+
+- Python 3.12+
+- A Supabase account
+- A Groq API key (free at console.groq.com)
+- An ElevenLabs API key (free tier available)
+
+### 1. Clone the repo
+
 ```bash
-# Enter the backend directory
+git clone https://github.com/DeepanshuSaxena14/ISE-500.git
+cd ISE-500
+```
+
+### 2. Set up the backend
+
+```bash
 cd backend
-
-# Create a virtual environment (only needed the very first time)
-python -m venv venv
-
-# Activate the virtual environment
-# Mac/Linux:
-source venv/bin/activate
-# Windows:
-# venv\Scripts\activate
-
-# Install the required Python packages
 pip install -r requirements.txt
-
-# Start the Flask web server
-python chat_service.py
 ```
 
-### Terminal 2: Run the Web Frontend
-This terminal builds the User Interface on port `5173`. Open a new tab in your terminal and run:
+Create a `.env` file in the `backend/` directory:
+
+```env
+SUPABASE_URL=your_supabase_url
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+GROQ_API_KEY=your_groq_api_key
+GROQ_MODEL=llama-3.1-8b-instant
+ELEVENLABS_API_KEY=your_elevenlabs_api_key
+ELEVENLABS_VOICE_ID=21m00Tcm4TlvDq8ikWAM
+BACKEND_BASE_URL=http://localhost:8000
+```
+
+Seed the database (first time only):
+
 ```bash
-# Enter the frontend directory
+python data/seed_data.py
+```
+
+Start the Fleet API:
+
+```bash
+python app.py
+# Runs on http://localhost:8000
+```
+
+In a separate terminal, start the AI Chat service:
+
+```bash
+python chat_service.py
+# Runs on http://localhost:5001
+```
+
+### 3. Set up the frontend
+
+```bash
 cd frontend
-
-# Install the Node dependencies
 npm install
+```
 
-# Start the Vite development server
+Create a `.env.local` file in the `frontend/` directory:
+
+```env
+VITE_API_URL=http://localhost:8000
+VITE_AI_URL=http://localhost:5001
+```
+
+Start the frontend:
+
+```bash
 npm run dev
+# Opens at http://localhost:5173
 ```
 
 ---
 
-## 3. Usage
-Once both servers are running:
-1. Open your browser and navigate to `http://localhost:5173`.
-2. Open the Chat Assistant interface.
-3. Test the Natural Language Understanding (NLU) by typing conversational or complex questions about the fleet, such as:
-   - *"Are any drivers running dangerously low on fuel?"*
-   - *"Find me the cheapest driver to take my load."*
-   - *"What is James's current ETA?"*
+## API Reference
 
-The AI will dynamically map your unstructured question to the underlying operational data endpoints!
+### Fleet API (port 8000)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check |
+| `/health/db` | GET | Database connection check |
+| `/driver-cards` | GET | All driver cards with alerts and performance |
+| `/loads` | GET | All loads |
+| `/loads/<id>/recommendations` | GET | AI dispatch recommendations for a load |
+
+### AI Chat API (port 5001)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/health` | GET | Health check |
+| `/api/chat` | POST | Send a fleet question, get structured AI response |
+| `/api/tts` | POST | Convert text to speech (returns audio/mpeg) |
+| `/api/voice/tts` | POST | Alias for `/api/tts` |
+
+**Example chat request:**
+```bash
+curl -X POST https://dynamic-analysis-production-9e03.up.railway.app/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Which drivers are available for dispatch?", "history": []}'
+```
+
+---
+
+## Deployment
+
+### Live URLs
+
+| Service | URL |
+|---------|-----|
+| Frontend | https://dispatchiq-steel.vercel.app |
+| Fleet API | https://ise-500-production.up.railway.app |
+| AI Chat | https://dynamic-analysis-production-9e03.up.railway.app |
+
+### Environment Variables Required
+
+**Railway — Fleet API (ISE-500):**
+```
+SUPABASE_URL
+SUPABASE_SERVICE_ROLE_KEY
+GROQ_API_KEY
+GROQ_MODEL
+ELEVENLABS_API_KEY
+ELEVENLABS_VOICE_ID
+PORT=8000
+```
+
+**Railway — AI Chat (dynamic-analysis):**
+```
+SUPABASE_URL
+SUPABASE_SERVICE_ROLE_KEY
+GROQ_API_KEY
+GROQ_MODEL
+ELEVENLABS_API_KEY
+ELEVENLABS_VOICE_ID
+PORT=5001
+BACKEND_BASE_URL=https://ise-500-production.up.railway.app
+```
+
+**Vercel — Frontend:**
+```
+VITE_API_URL=https://ise-500-production.up.railway.app
+VITE_AI_URL=https://dynamic-analysis-production-9e03.up.railway.app
+```
+
+### Auto-Deploy
+
+- **Frontend** — pushes to `main` auto-deploy via Vercel Git integration
+- **Backend** — pushes to `main` auto-deploy via Railway Git integration
+
+---
+
+## AI Features
+
+### 1. Intent-Based Dispatch Query
+The AI chat system uses LangChain to classify questions into intents (fleet summary, driver status, alerts, dispatch ranking) and routes them to specialized handlers that pull live data from Supabase.
+
+### 2. Provider-Agnostic Fleet Data
+The `FleetProvider` abstraction (`api_provider.py` / `mock_provider.py`) allows the AI layer to work with real Supabase data in production and mock data in development — zero code changes needed to switch.
+
+### 3. Voice Copilot
+The Voice Copilot first calls `/api/chat` to generate a concise 2-sentence briefing using Groq, then pipes that text to ElevenLabs TTS via `/api/tts`, and streams the audio directly to the browser.
+
+---
+
+### Screenshots
+![alt text](/images/image.png)
+
+![alt text](/images/image-1.png)
+
+![alt text](/images/image-2.png)
+
+![alt text](/images/image-3.png)
+
+![alt text](/images/image-4.png)
+
+![alt text](/images/image-5.png)
