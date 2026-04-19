@@ -277,32 +277,46 @@ export default function AIChatAssistant() {
     const newHistory = [...conversationHistory, { role: "user", content: userText }];
 
     try {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
+      const response = await fetch("http://localhost:5001/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-3-5-sonnet-latest",
-          max_tokens: 1000,
-          system: SYSTEM_PROMPT,
-          messages: newHistory,
-        }),
+        body: JSON.stringify({ question: userText, history: newHistory })
       });
+      
       const data = await response.json();
-      const raw = data.content?.map(b => b.text || "").join("") || "";
-      const parsed = parseAIResponse(raw);
-      const aiMsg = { id: Date.now() + 1, role: "ai", text: raw, time: timeStr(), parsed };
-      setMessages(prev => [...prev, aiMsg]);
-      setConversationHistory([...newHistory, { role: "assistant", content: raw }]);
-    } catch (err) {
-      // Graceful fallback
-      const fallbacks = {
-        "miss": { headline: "2 drivers at risk of missing windows", summary: "James Okafor (LD-4809 → Phoenix) is critically low on HOS at 2.1h with 29% fuel — needs immediate intervention. Devon Carter (LD-4815 → Flagstaff) is running 47 minutes behind schedule due to wind advisory on I-40.", type: "alert", severity: "critical", drivers: [{ id: "D-003", name: "James Okafor", rank: 1, tag: "At Risk", tagColor: "red", note: "HOS critical + fuel critical. Consider arranging relay at nearest truck stop." }, { id: "D-005", name: "Devon Carter", rank: 2, tag: "Delayed", tagColor: "amber", note: "47 min behind due to I-40 wind advisory. Monitor for further delays." }], actions: [{ label: "Arrange relay for James", type: "danger" }, { label: "Notify Devon's customer", type: "secondary" }], tableRows: [] },
-        "available": { headline: "1 driver available for dispatch now", summary: "Tanya Reyes (TRK-177) just completed her Tucson delivery and is available with 10h HOS and 91% fuel — best positioned driver in the fleet right now. Sandra Kim is on break, available in ~22 minutes.", type: "recommendation", severity: "normal", drivers: [{ id: "D-004", name: "Tanya Reyes", rank: 1, tag: "Available", tagColor: "green", note: "Best pick — maximum HOS headroom and nearly full tank. Ready immediately." }, { id: "D-002", name: "Sandra Kim", rank: 2, tag: "Available", tagColor: "blue", note: "Break ends in ~22 minutes. 7.2h HOS remaining." }], actions: [{ label: "Assign load to Tanya", type: "primary" }], tableRows: [] },
-        "summary": { headline: "5 alerts across fleet — 2 critical", summary: "James Okafor has dual critical alerts (HOS + fuel). Devon Carter is running late. Sandra Kim's break ends soon. Priya Nair is in 34h reset. All others operating normally.", type: "alert", severity: "warning", drivers: [], tableRows: [{ label: "Critical alerts", value: "2 (James + Devon)" }, { label: "Warnings", value: "3" }, { label: "Info", value: "2" }, { label: "Drivers affected", value: "4 of 8" }], actions: [{ label: "View all alerts", type: "secondary" }] },
-        "default": { headline: "Here's the current fleet status", summary: "8 drivers total: 5 en route, 1 on break, 1 available, 1 off duty. Devon Carter is 47 min delayed and James Okafor has critical HOS + fuel alerts requiring immediate attention.", type: "status", severity: "normal", drivers: [], tableRows: [{ label: "En Route", value: "5 drivers" }, { label: "Available", value: "1 driver (Tanya)" }, { label: "On Break", value: "1 driver (Sandra)" }, { label: "Off Duty", value: "1 driver (Priya)" }, { label: "Critical alerts", value: "2" }], actions: [] },
+      if (!response.ok) throw new Error(data.error || "Failed to communicate with AI layer");
+
+      const rawAnswer = data.answer || "I'm having trouble retrieving that information.";
+      const intentHeadline = data.intent ? data.intent.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : "Chat Response";
+      
+      const parsed = {
+        headline: intentHeadline,
+        summary: rawAnswer,
+        type: (data.intent || "").includes('alert') ? 'alert' : 'info',
+        severity: "normal",
+        drivers: [],
+        tableRows: [],
+        actions: (data.suggested_followups || []).map(f => ({ label: f, type: "secondary" }))
       };
-      const key = userText.toLowerCase().includes("miss") || userText.toLowerCase().includes("window") || userText.toLowerCase().includes("deadline") ? "miss" : userText.toLowerCase().includes("available") || userText.toLowerCase().includes("dispatch") || userText.toLowerCase().includes("take") ? "available" : userText.toLowerCase().includes("alert") || userText.toLowerCase().includes("summary") ? "summary" : "default";
-      const parsed = fallbacks[key];
+
+      const aiMsg = { id: Date.now() + 1, role: "ai", text: rawAnswer, time: timeStr(), parsed };
+      setMessages(prev => [...prev, aiMsg]);
+      setConversationHistory([...newHistory, { role: "assistant", content: rawAnswer }]);
+    } catch (err) {
+      console.error(err);
+      
+      const errorMsg = err.message || "Cannot connect to the AI backend. Please ensure the Flask server is running on port 5001.";
+      const isConnectionError = errorMsg.includes("Failed to fetch") || errorMsg.includes("Cannot connect");
+      
+      const parsed = {
+        headline: isConnectionError ? "Backend Offline" : "API Integration Error",
+        summary: errorMsg,
+        type: "alert",
+        severity: isConnectionError ? "warning" : "critical",
+        drivers: [],
+        tableRows: [],
+        actions: []
+      };
       setMessages(prev => [...prev, { id: Date.now() + 1, role: "ai", text: "", time: timeStr(), parsed }]);
       setConversationHistory([...newHistory, { role: "assistant", content: JSON.stringify(parsed) }]);
     }
