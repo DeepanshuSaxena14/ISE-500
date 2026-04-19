@@ -1,0 +1,10 @@
+version: "3.9"
+
+services:
+  dispatch-api:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    command: python app.py
