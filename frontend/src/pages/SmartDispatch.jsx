@@ -1,6 +1,8 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { useLocation } from "react-router-dom";
+import { dispatchService } from "../api";
 
-const LOAD = {
+const DEFAULT_LOAD = {
   id: "LD-4821",
   origin: "Phoenix, AZ",
   originShort: "PHX",
@@ -16,46 +18,22 @@ const LOAD = {
   specialNotes: "Liftgate required. No-touch freight.",
 };
 
-const MOCK_DRIVERS = [
-  {
-    id: "D-001", name: "Marcus Rivera", avatar: "MR",
-    location: "Mesa, AZ", distanceToPickup: 18,
-    hosRemaining: 9.5, hosStatus: "Available",
-    lastLoad: "Tucson → Phoenix", truckId: "TRK-114",
-    fuelLevel: 78, rating: 4.8, totalMiles: 312000,
-    recentOnTime: 96, deadheadMiles: 18,
-    estimatedCostPerMile: 2.61, estimatedFuelCost: 198,
-  },
-  {
-    id: "D-002", name: "Sandra Kim", avatar: "SK",
-    location: "Tempe, AZ", distanceToPickup: 22,
-    hosRemaining: 7.2, hosStatus: "Available",
-    lastLoad: "Flagstaff → Tempe", truckId: "TRK-089",
-    fuelLevel: 52, rating: 4.9, totalMiles: 287000,
-    recentOnTime: 98, deadheadMiles: 22,
-    estimatedCostPerMile: 2.68, estimatedFuelCost: 211,
-  },
-  {
-    id: "D-003", name: "James Okafor", avatar: "JO",
-    location: "Chandler, AZ", distanceToPickup: 31,
-    hosRemaining: 6.0, hosStatus: "At Risk",
-    lastLoad: "Albuquerque → Chandler", truckId: "TRK-201",
-    fuelLevel: 34, rating: 4.5, totalMiles: 198000,
-    recentOnTime: 88, deadheadMiles: 31,
-    estimatedCostPerMile: 2.74, estimatedFuelCost: 228,
-  },
-  {
-    id: "D-004", name: "Tanya Reyes", avatar: "TR",
-    location: "Gilbert, AZ", distanceToPickup: 41,
-    hosRemaining: 10.0, hosStatus: "Available",
-    lastLoad: "Tucson → Gilbert", truckId: "TRK-177",
-    fuelLevel: 91, rating: 4.7, totalMiles: 254000,
-    recentOnTime: 93, deadheadMiles: 41,
-    estimatedCostPerMile: 2.79, estimatedFuelCost: 245,
-  },
-];
 
 const HOS_NEEDED = 8.5;
+
+// Haversine formula to calculate miles between two coordinates
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 3958.8; // Radius of the Earth in miles
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(R * c);
+}
+
+
 
 function ScoreBar({ value, max = 100, color }) {
   const pct = Math.round((value / max) * 100);
@@ -85,7 +63,7 @@ function StatPill({ label, value, warn }) {
 }
 
 function DriverCard({ driver, rank, selected, onClick, aiResult, loading }) {
-  const hosOk = driver.hosRemaining >= HOS_NEEDED;
+
   const rankColors = ["text-teal-300 border-teal-400/50 bg-teal-400/10", "text-blue-300 border-blue-400/50 bg-blue-400/10", "text-white/60 border-white/20 bg-white/5", "text-white/40 border-white/10 bg-white/5"];
   const rankLabels = ["#1 Recommended", "#2 Strong", "#3 Viable", "#4 Not ideal"];
   const borderColors = ["border-teal-400/40", "border-blue-400/30", "border-white/15", "border-white/10"];
@@ -113,20 +91,22 @@ function DriverCard({ driver, rank, selected, onClick, aiResult, loading }) {
         </div>
 
         <div className="flex gap-2 mb-3 flex-wrap">
-          <StatPill label="HOS left" value={`${driver.hosRemaining}h`} warn={!hosOk} />
-          <StatPill label="To pickup" value={`${driver.distanceToPickup}mi`} />
-          <StatPill label="Fuel" value={`${driver.fuelLevel}%`} warn={driver.fuelLevel < 40} />
-          <StatPill label="On-time" value={`${driver.recentOnTime}%`} />
-          <StatPill label="Est. CPM" value={driver.estimatedCostPerMile.toFixed(2)} />
+          <StatPill label="HOS left" value={driver.hosRemaining != null ? `${driver.hosRemaining}h` : 'N/A'} warn={driver.hosRemaining < 8.5} />
+          <StatPill label="To pickup" value={driver.distanceToPickup != null ? `${driver.distanceToPickup}mi` : 'N/A'} />
+          <StatPill label="Fuel" value={driver.fuelLevel != null ? `${driver.fuelLevel}%` : 'N/A'} warn={driver.fuelLevel < 40} />
+          <StatPill label="OOR Mi" value={driver.oorMiles != null ? `${driver.oorMiles} mi` : 'N/A'} warn={driver.oorMiles > driver.scheduleMiles * 0.05} />
         </div>
 
-        <div className="mb-3">
-          <div className="flex justify-between text-[10px] text-white/40 mb-1">
-            <span>HOS available</span>
-            <span className={!hosOk ? "text-amber-400" : "text-teal-400"}>{driver.hosRemaining}h of {HOS_NEEDED}h needed</span>
+        {/* Alerts bar */}
+        {driver.alerts && driver.alerts.length > 0 && (
+          <div className="mb-3 space-y-1">
+            {driver.alerts.map((alert, idx) => (
+              <div key={idx} className={`text-[10px] px-2 py-1 rounded border ${alert.severity === 'high' ? 'bg-red-500/20 border-red-500/40 text-red-200' : alert.severity === 'medium' ? 'bg-amber-500/20 border-amber-500/40 text-amber-200' : 'bg-blue-500/20 border-blue-500/40 text-blue-200'}`}>
+                ⚠ {alert.text}
+              </div>
+            ))}
           </div>
-          <ScoreBar value={driver.hosRemaining} max={11} color={!hosOk ? "amber" : "teal"} />
-        </div>
+        )}
 
         <div className={`rounded-lg border p-3 mt-2 transition-all duration-300 min-h-[56px]
           ${selected ? "border-teal-500/30 bg-teal-900/20" : "border-white/8 bg-black/20"}`}>
@@ -152,120 +132,114 @@ function DriverCard({ driver, rank, selected, onClick, aiResult, loading }) {
 }
 
 export default function SmartDispatch() {
+  const [load, setLoad] = useState(DEFAULT_LOAD);
+  const [rankedDrivers, setRankedDrivers] = useState([]);
   const [aiResults, setAiResults] = useState({});
-  const [loading, setLoading] = useState(false);
   const [selectedDriver, setSelectedDriver] = useState(null);
   const [dispatched, setDispatched] = useState(false);
-  const [streamedText, setStreamedText] = useState("");
   const [overallLoading, setOverallLoading] = useState(false);
-  const [rankedDrivers, setRankedDrivers] = useState(MOCK_DRIVERS);
   const [analysisPhase, setAnalysisPhase] = useState("");
-  const abortRef = useRef(null);
+  const location = useLocation();
+  const navigatedLoadId = location.state?.selectedLoadId;
+
+  const fetchRecommendations = useCallback(async (specificLoadId) => {
+    const targetLoadId = specificLoadId || load.id;
+    if (!targetLoadId) return;
+
+    setOverallLoading(true);
+    setAnalysisPhase("Fetching driver HOS & GPS data...");
+
+    try {
+      setAnalysisPhase("Scoring proximity & route efficiency...");
+      await new Promise(r => setTimeout(r, 800)); // Visual feedback
+
+      setAnalysisPhase("Ranking 100% of available fleet with backend scoring engine...");
+      // Fetch full ranking across all drivers
+      const recommendationsFull = await dispatchService.getRecommendations(targetLoadId);
+      if (!recommendationsFull) throw new Error("No fleet data returned");
+
+      // Concurrently fetch AI reasoning for why the top matches were selected
+      setAnalysisPhase("Applying LLM reasoning for top candidates...");
+      let aiRationale = null;
+      let topDriverId = null;
+
+      try {
+        const explained = await dispatchService.getRecommendationsExplained(targetLoadId);
+        if (explained && explained.top_candidate) {
+          aiRationale = explained.ai_rationale;
+          topDriverId = explained.top_candidate.driver_id.toString();
+        }
+      } catch (err) {
+        console.warn("AI generation error handled:", err);
+      }
+
+      const mappedDrivers = recommendationsFull.map(r => ({
+        id: r.driver_id.toString(),
+        name: r.driver_name,
+        avatar: r.driver_name.split(' ').map(n => n[0] || '').join(''),
+        location: r.driver_card.location_label,
+        truckId: r.vehicle_no,
+        status: r.driver_card.status_label,
+        alerts: r.driver_card.alerts || [],
+        hosRemaining: r.driver_card.hos_remaining_hours,
+        distanceToPickup: r.driver_card.distance_to_pickup,
+        fuelLevel: r.driver_card.fuel_pct,
+        oorMiles: r.driver_card.performance ? r.driver_card.performance.oor_miles : null,
+        scheduleMiles: r.driver_card.performance ? r.driver_card.performance.schedule_miles : null,
+        actualMiles: r.driver_card.performance ? r.driver_card.performance.actual_miles : null,
+        scheduleTime: r.driver_card.performance ? r.driver_card.performance.schedule_time : null,
+        actualTime: r.driver_card.performance ? r.driver_card.performance.actual_time : null,
+        score: r.score,
+        feasible: r.feasible,
+      }));
+
+      const reasoning = {};
+      recommendationsFull.forEach(r => {
+        reasoning[r.driver_id.toString()] = r.reasons.join(". ") + (r.warnings.length ? ". Warnings: " + r.warnings.join(". ") : "");
+      });
+
+      // Override the top candidate's algorithmic reasoning with the actual Groq LLM logic if available
+      if (topDriverId && aiRationale) {
+        reasoning[topDriverId] = aiRationale;
+      }
+
+      setRankedDrivers(mappedDrivers);
+      setAiResults(reasoning);
+      setSelectedDriver(mappedDrivers[0]?.id || null);
+    } catch (error) {
+      console.error("Failed to fetch recommendations:", error);
+    } finally {
+      setOverallLoading(true); // Incorrect in logic? Wait, the state was overallLoading. Let's fix that too.
+      setOverallLoading(false);
+      setAnalysisPhase("");
+    }
+  }, [load.id]);
+
+  useEffect(() => {
+    dispatchService.getLoads()
+      .then(loads => {
+        if (navigatedLoadId) {
+          const found = loads.find(l => l.id === navigatedLoadId);
+          if (found) {
+            setLoad(found);
+            // Auto run recommendations for the new load
+            setTimeout(() => fetchRecommendations(found.id), 500);
+            return;
+          }
+        }
+        if (loads && loads.length > 0) {
+          setLoad(loads[0]);
+        }
+      })
+      .catch(console.error);
+  }, [navigatedLoadId, fetchRecommendations]);
 
   const runDispatch = async () => {
-    if (loading || overallLoading) return;
+    if (overallLoading) return;
     setAiResults({});
     setSelectedDriver(null);
     setDispatched(false);
-    setStreamedText("");
-    setOverallLoading(true);
-
-    const phases = ["Fetching driver HOS & GPS data...", "Scoring proximity & deadhead miles...", "Evaluating fuel costs & route efficiency...", "Ranking drivers with AI..."];
-    for (let p of phases) {
-      setAnalysisPhase(p);
-      await new Promise(r => setTimeout(r, 600));
-    }
-    setAnalysisPhase("");
-
-    const driversInfo = MOCK_DRIVERS.map((d, i) => `Driver ${i + 1}: ${d.name} (${d.id})
-- Location: ${d.location}, ${d.distanceToPickup} miles from pickup
-- HOS remaining: ${d.hosRemaining}h (need ${HOS_NEEDED}h minimum)
-- Fuel level: ${d.fuelLevel}%
-- Recent on-time rate: ${d.recentOnTime}%
-- Deadhead miles: ${d.deadheadMiles}
-- Estimated cost per mile: $${d.estimatedCostPerMile}
-- Rating: ${d.rating}/5`).join("\n\n");
-
-    const prompt = `You are an AI dispatch assistant for a trucking fleet. Analyze these drivers for Load ${LOAD.id}:
-
-LOAD DETAILS:
-- Route: ${LOAD.origin} → ${LOAD.destination} (${LOAD.miles} miles)
-- Pickup: ${LOAD.pickupTime}
-- Delivery deadline: ${LOAD.deliveryDeadline}
-- Weight: ${LOAD.weight}
-- Notes: ${LOAD.specialNotes}
-- HOS required: at least ${HOS_NEEDED} hours
-
-AVAILABLE DRIVERS:
-${driversInfo}
-
-Return ONLY a valid JSON object with this exact structure, no markdown, no explanation:
-{
-  "ranking": ["D-001","D-002","D-003","D-004"],
-  "reasoning": {
-    "D-001": "2-sentence dispatch reasoning for this driver for this specific load",
-    "D-002": "2-sentence dispatch reasoning",
-    "D-003": "2-sentence dispatch reasoning",
-    "D-004": "2-sentence dispatch reasoning"
-  }
-}
-
-Focus reasoning on: HOS fit, proximity to pickup, cost efficiency, on-time history, and any risks. Be specific and decisive.`;
-
-    const OPS_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
-
-    try {
-      let parsed = null;
-
-      // Try Flask /loads/<id>/recommendations first (live backend)
-      const flaskRes = await fetch(`${OPS_URL}/loads/${LOAD.id}/recommendations`).catch(() => null);
-      if (flaskRes && flaskRes.ok) {
-        const flaskData = await flaskRes.json();
-        if (flaskData.recommendations && Array.isArray(flaskData.recommendations)) {
-          const ranking = flaskData.recommendations.map(r => r.driver_id || r.id).filter(Boolean);
-          const reasoning = {};
-          flaskData.recommendations.forEach(r => {
-            const id = r.driver_id || r.id;
-            if (id) reasoning[id] = r.reasoning || r.summary || "Recommended by dispatch engine.";
-          });
-          parsed = { ranking, reasoning };
-        }
-      }
-
-      // If Flask unavailable, fall back to direct Anthropic call
-      if (!parsed) {
-        const response = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: "claude-sonnet-4-20250514",
-            max_tokens: 1000,
-            messages: [{ role: "user", content: prompt }],
-          }),
-        });
-        const data = await response.json();
-        const text = data.content?.map(b => b.text || "").join("") || "";
-        const clean = text.replace(/```json|```/g, "").trim();
-        parsed = JSON.parse(clean);
-      }
-
-      // Reorder drivers by AI ranking
-      const ordered = parsed.ranking.map(id => MOCK_DRIVERS.find(d => d.id === id)).filter(Boolean);
-      setRankedDrivers(ordered);
-      setAiResults(parsed.reasoning || {});
-      setSelectedDriver(ordered[0]?.id || null);
-    } catch (e) {
-      const fallback = {
-        "D-001": "Marcus is the top pick — 18 miles from pickup with 9.5h HOS comfortably covers the 8.5h requirement, and his 96% on-time rate and lowest deadhead cost make him the most cost-efficient assignment.",
-        "D-002": "Sandra has the highest on-time rate in the fleet at 98% and is only 22 miles out, but her 7.2h HOS is tighter and her fuel level at 52% will require a fill stop that adds cost.",
-        "D-003": "James is borderline — his 6.0h HOS is below the 8.5h needed for this run, creating a compliance risk. Assign only if Marcus and Sandra are unavailable and HOS can be recalculated.",
-        "D-004": "Tanya has maximum HOS and high fuel, but at 41 deadhead miles she's the most expensive option. Reserve her for loads that originate further east.",
-      };
-      setAiResults(fallback);
-      setSelectedDriver("D-001");
-    }
-
-    setOverallLoading(false);
+    fetchRecommendations();
   };
 
   const confirmDispatch = () => {
@@ -276,6 +250,13 @@ Focus reasoning on: HOS fit, proximity to pickup, cost efficiency, on-time histo
   const selectedInfo = rankedDrivers.find(d => d.id === selectedDriver);
   const selectedRank = rankedDrivers.findIndex(d => d.id === selectedDriver);
   const hasResults = Object.keys(aiResults).length > 0;
+
+  const actualMiles = (load.pickup_lat && load.dropoff_lat)
+    ? calculateDistance(load.pickup_lat, load.pickup_lng, load.dropoff_lat, load.dropoff_lng)
+    : (load.miles || 850);
+
+  const ratePerMile = 2.25;
+  const actualRate = (actualMiles * ratePerMile).toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 });
 
   return (
     <div className="flex flex-col gap-6">
@@ -291,36 +272,42 @@ Focus reasoning on: HOS fit, proximity to pickup, cost efficiency, on-time histo
 
         {/* LEFT: drivers */}
         <div>
+
+          {/* Load card */}
           <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 mb-5">
             <div className="flex items-start justify-between mb-3">
               <div>
                 <div className="flex items-center gap-2 mb-1">
                   <span className="text-[10px] font-semibold tracking-widest text-white/40 uppercase">Load</span>
-                  <span className="text-xs font-bold text-teal-300 bg-teal-900/30 border border-teal-500/30 px-2 py-0.5 rounded">{LOAD.id}</span>
+                  <span className="text-xs font-bold text-teal-300 bg-teal-900/30 border border-teal-500/30 px-2 py-0.5 rounded">{load.id}</span>
                   <span className="text-[10px] text-amber-400 bg-amber-900/20 border border-amber-500/30 px-2 py-0.5 rounded">Unassigned</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-xl font-bold text-white tracking-tight">{LOAD.originShort}</span>
+                  <span className="text-xl font-bold text-white tracking-tight">
+                    {load.originShort || (load.origin ? load.origin.slice(0, 3) : load.pickup_name ? load.pickup_name.slice(0, 3) : 'UNK').toUpperCase()}
+                  </span>
                   <div className="flex-1 flex items-center gap-1 px-2">
                     <div className="flex-1 h-px bg-white/20" />
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6h8M7 3l3 3-3 3" stroke="white" strokeOpacity=".5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
                     <div className="flex-1 h-px bg-white/20" />
                   </div>
-                  <span className="text-xl font-bold text-white tracking-tight">{LOAD.destinationShort}</span>
+                  <span className="text-xl font-bold text-white tracking-tight">
+                    {load.destinationShort || (load.destination ? load.destination.slice(0, 3) : load.dropoff_name ? load.dropoff_name.slice(0, 3) : 'UNK').toUpperCase()}
+                  </span>
                 </div>
-                <div className="text-[11px] text-white/40 mt-0.5">{LOAD.origin} → {LOAD.destination}</div>
+                <div className="text-[11px] text-white/40 mt-0.5">{load.origin || load.pickup_name || 'N/A'} → {load.destination || load.dropoff_name || 'N/A'}</div>
               </div>
               <div className="text-right">
-                <div className="text-xl font-bold text-teal-300">{LOAD.rate}</div>
-                <div className="text-[11px] text-white/40">{LOAD.ratePerMile}/mi</div>
+                <div className="text-xl font-bold text-teal-300">{actualRate}</div>
+                <div className="text-[11px] text-white/40">${ratePerMile.toFixed(2)}/mi</div>
               </div>
             </div>
             <div className="grid grid-cols-4 gap-3 pt-3 border-t border-white/8">
               {[
-                ["Distance", `${LOAD.miles.toLocaleString()} mi`],
-                ["Pickup", LOAD.pickupTime],
-                ["Deadline", LOAD.deliveryDeadline],
-                ["Weight", LOAD.weight],
+                ["Distance", `${actualMiles} mi`],
+                ["Pickup", new Date(load.pickupTime || load.pickup_time).toLocaleString()],
+                ["Deadline", new Date(load.deliveryDeadline || load.dropoff_time).toLocaleString()],
+                ["Weight", load.weight || '42,000 lbs'],
               ].map(([label, val]) => (
                 <div key={label}>
                   <div className="text-[10px] text-white/35 uppercase tracking-wider">{label}</div>
@@ -329,7 +316,7 @@ Focus reasoning on: HOS fit, proximity to pickup, cost efficiency, on-time histo
               ))}
             </div>
             <div className="mt-2 pt-2 border-t border-white/8 text-[11px] text-white/40">
-              <span className="text-white/25">Commodity:</span> {LOAD.commodity} &nbsp;·&nbsp; <span className="text-white/25">Notes:</span> {LOAD.specialNotes}
+              <span className="text-white/25">Commodity:</span> {load.commodity || 'General Freight'} &nbsp;·&nbsp; <span className="text-white/25">Notes:</span> {load.specialNotes || 'Standard delivery.'}
             </div>
           </div>
 
@@ -369,7 +356,7 @@ Focus reasoning on: HOS fit, proximity to pickup, cost efficiency, on-time histo
             onClick={runDispatch}
             disabled={overallLoading || dispatched}
             className={`w-full py-3.5 rounded-xl font-bold text-sm tracking-wider transition-all duration-200 border
-              ${dispatched
+            ${dispatched
                 ? "bg-white/5 border-white/10 text-white/30 cursor-not-allowed"
                 : overallLoading
                   ? "bg-teal-900/30 border-teal-500/30 text-teal-400/60 cursor-not-allowed"
@@ -393,11 +380,13 @@ Focus reasoning on: HOS fit, proximity to pickup, cost efficiency, on-time histo
               </div>
               <div className="space-y-2 mb-4">
                 {[
-                  ["Deadhead miles", `${selectedInfo.deadheadMiles} mi`],
-                  ["HOS available", `${selectedInfo.hosRemaining}h`],
-                  ["Est. fuel cost", `$${selectedInfo.estimatedFuelCost}`],
-                  ["Est. CPM", `$${selectedInfo.estimatedCostPerMile.toFixed(2)}`],
-                  ["Driver rating", `${selectedInfo.rating} / 5.0`],
+                  ["Status", selectedInfo.status || 'Unknown'],
+                  ["Distance to Pickup", selectedInfo.distanceToPickup != null ? `${selectedInfo.distanceToPickup} mi` : 'N/A'],
+                  ["HOS Available", selectedInfo.hosRemaining != null ? `${selectedInfo.hosRemaining}h` : 'N/A'],
+                  ["Fuel Level", selectedInfo.fuelLevel != null ? `${selectedInfo.fuelLevel}%` : 'N/A'],
+                  ["Scheduled Miles", selectedInfo.scheduleMiles != null ? `${selectedInfo.scheduleMiles} mi` : 'N/A'],
+                  ["Actual Miles", selectedInfo.actualMiles != null ? `${selectedInfo.actualMiles} mi` : 'N/A'],
+                  ["Out-of-Route Miles", selectedInfo.oorMiles != null ? `${selectedInfo.oorMiles} mi` : 'N/A'],
                 ].map(([label, val]) => (
                   <div key={label} className="flex justify-between text-[11px]">
                     <span className="text-white/40">{label}</span>
@@ -429,7 +418,7 @@ Focus reasoning on: HOS fit, proximity to pickup, cost efficiency, on-time histo
                 <span className="text-sm font-bold text-teal-300">Load Assigned</span>
               </div>
               <p className="text-[11px] text-teal-300/70 leading-relaxed">
-                {LOAD.id} dispatched to <strong className="text-teal-200">{selectedInfo.name}</strong> ({selectedInfo.truckId}). Notification sent. ETA calculated.
+                {load.id} dispatched to <strong className="text-teal-200">{selectedInfo.name}</strong> ({selectedInfo.truckId}). Notification sent. ETA calculated.
               </p>
               <div className="mt-3 pt-3 border-t border-teal-500/20 text-[11px] text-teal-300/50">
                 Dispatched at {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -458,18 +447,22 @@ Focus reasoning on: HOS fit, proximity to pickup, cost efficiency, on-time histo
             </div>
           </div>
 
+          {/* Performance summary */}
           {hasResults && !overallLoading && (
             <div className="rounded-xl border border-white/8 bg-white/[0.02] p-4">
-              <div className="text-[10px] text-white/30 uppercase tracking-widest mb-3">Cost Comparison</div>
+              <div className="text-[10px] text-white/30 uppercase tracking-widest mb-3">Performance Comparison</div>
               <div className="space-y-2">
-                {rankedDrivers.map((d, i) => (
-                  <div key={d.id} className={`flex items-center gap-2 text-[11px] p-1.5 rounded-md transition-colors ${selectedDriver === d.id ? "bg-teal-900/20" : ""}`}>
-                    <span className={`w-4 text-center font-bold ${i === 0 ? "text-teal-400" : "text-white/30"}`}>{i + 1}</span>
-                    <span className="text-white/60 flex-1 truncate">{d.name.split(" ")[0]}</span>
-                    <span className={`font-semibold ${i === 0 ? "text-teal-300" : "text-white/50"}`}>${d.estimatedCostPerMile.toFixed(2)}/mi</span>
-                    {i === 0 && <span className="text-[9px] text-teal-400 bg-teal-900/40 px-1.5 py-0.5 rounded">BEST</span>}
-                  </div>
-                ))}
+                {rankedDrivers.map((d, i) => {
+                  const scheduleSpeed = (d.scheduleTime && d.scheduleMiles) ? (d.scheduleMiles / (d.scheduleTime / 60)).toFixed(1) : 'N/A';
+                  return (
+                    <div key={d.id} className={`flex items-center gap-2 text-[11px] p-1.5 rounded-md transition-colors ${selectedDriver === d.id ? "bg-teal-900/20" : ""}`}>
+                      <span className={`w-4 text-center font-bold ${i === 0 ? "text-teal-400" : "text-white/30"}`}>{i + 1}</span>
+                      <span className="text-white/60 flex-1 truncate">{d.name.split(" ")[0]}</span>
+                      <span className={`font-semibold ${i === 0 ? "text-teal-300" : "text-white/50"}`}>{scheduleSpeed} mph av.</span>
+                      {i === 0 && <span className="text-[9px] text-teal-400 bg-teal-900/40 px-1.5 py-0.5 rounded">BEST</span>}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
