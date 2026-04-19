@@ -41,6 +41,9 @@ export const dispatchService = {
     console.log(`[dispatchService] assigning load ${loadId} to driver ${driverId}`);
     return { success: true };
   },
+  getLoads: async () => {
+    return fetchJson('/loads');
+  }
 };
 
 export const alertService = {
