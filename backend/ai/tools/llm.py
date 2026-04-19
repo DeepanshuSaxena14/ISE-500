@@ -6,7 +6,7 @@ try:
 except ImportError:
     ChatGroq = None
 
-def generate_text(prompt: str, system_message: str = "You are DispatchIQ, a helpful fleet assistant.", history: list = None) -> str:
+def generate_text(prompt: str, system_message: str = "You are DispatchIQ, a professional fleet operations assistant. Your primary directive is accuracy. You must provide answers based strictly on the facts provided in the prompt. Never invent details, names, or contact information. If a detail is missing from the record, simply state that the information is currently unavailable in the database.", history: list = None) -> str:
     """
     Generate text using Groq and LangChain with conversational memory.
     """
