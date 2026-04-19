@@ -27,6 +27,10 @@ export const dispatchService = {
     if (!loadId) return [];
     return fetchJson(`/loads/${loadId}/recommendations`);
   },
+  getRecommendationsExplained: async (loadId) => {
+    if (!loadId) return null;
+    return fetchJson(`/loads/${loadId}/recommendation/explain`);
+  },
   assignLoad: async (loadId, driverId) => {
     // This isn't implemented in app.py yet, but we'll follow the pattern
     console.log(`Assigning load ${loadId} to driver ${driverId}`);

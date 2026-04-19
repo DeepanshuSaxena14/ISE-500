@@ -159,6 +159,7 @@ function DriverCard({ driver, rank, selected, onClick, aiResult, loading }) {
 
 export default function SmartDispatch() {
   const [load, setLoad] = useState(DEFAULT_LOAD);
+  const [loadsList, setLoadsList] = useState([]);
   const [aiResults, setAiResults] = useState({});
   const [loading, setLoading] = useState(false);
   const [selectedDriver, setSelectedDriver] = useState(null);
@@ -167,34 +168,38 @@ export default function SmartDispatch() {
   const [rankedDrivers, setRankedDrivers] = useState([]);
   const [analysisPhase, setAnalysisPhase] = useState("");
 
+  useEffect(() => {
+    dispatchService.getLoads()
+      .then(loads => {
+        if (loads && loads.length > 0) {
+          setLoadsList(loads);
+          setLoad(loads[0]);
+        }
+      })
+      .catch(console.error);
+  }, []);
+
   const fetchRecommendations = async () => {
     setOverallLoading(true);
     setAnalysisPhase("Fetching driver HOS & GPS data...");
     
     try {
-      // First, ensure we have a load in the backend or just use a default ID for demo
-      // In a real app, we'd fetch loads first. Here we assume 'LD-4821' or similar.
-      const loads = await dispatchService.getLoads();
-      let activeLoad = loads[0] || DEFAULT_LOAD;
-      if (!loads[0]) {
-        // If no loads exist, create one for demo
-        activeLoad = await dispatchService.createLoad ? await dispatchService.createLoad(DEFAULT_LOAD) : DEFAULT_LOAD;
-      }
-      setLoad(activeLoad);
-
       setAnalysisPhase("Scoring proximity & route efficiency...");
       await new Promise(r => setTimeout(r, 800)); // Visual feedback
 
       setAnalysisPhase("Ranking drivers with backend AI...");
-      const recommendations = await dispatchService.getRecommendations(activeLoad.id);
+      const explained = await dispatchService.getRecommendationsExplained(load.id);
+      if (!explained) throw new Error("No data returned");
+      
+      const recommendations = [explained.top_candidate, ...(explained.runner_ups || [])];
       
       const mappedDrivers = recommendations.map(r => ({
         id: r.driver_id.toString(),
         name: r.driver_name,
         avatar: r.driver_name.split(' ').map(n => n[0]).join(''),
         location: r.driver_card.location_label,
-        distanceToPickup: 25, // This would ideally come from backend
-        hosRemaining: r.driver_card.performance ? (r.driver_card.performance.schedule_time / 60) : 10.0,
+        distanceToPickup: 25, // Mocked 
+        hosRemaining: r.driver_card.performance ? parseFloat((r.driver_card.performance.schedule_time / 60).toFixed(1)) : 10.0,
         hosStatus: r.feasible ? "Available" : "At Risk",
         truckId: r.vehicle_no,
         fuelLevel: r.driver_card.fuel_pct || 80,
@@ -209,6 +214,11 @@ export default function SmartDispatch() {
       recommendations.forEach(r => {
         reasoning[r.driver_id.toString()] = r.reasons.join(". ") + ". " + r.warnings.join(". ");
       });
+
+      // Override the top candidate's reasoning with the actual AI rationale
+      if (explained.top_candidate && explained.ai_rationale) {
+        reasoning[explained.top_candidate.driver_id.toString()] = explained.ai_rationale;
+      }
 
       setRankedDrivers(mappedDrivers);
       setAiResults(reasoning);
@@ -252,6 +262,31 @@ export default function SmartDispatch() {
 
         {/* LEFT: drivers */}
         <div>
+          {/* Load Selector */}
+          {loadsList.length > 0 && (
+            <div className="mb-4">
+              <label className="text-[10px] text-white/40 uppercase tracking-widest block mb-1">Select Load</label>
+              <select 
+                className="w-full bg-black/40 border border-white/10 rounded-lg p-2.5 text-sm font-semibold text-white/90 outline-none focus:border-teal-500/50 transition-colors"
+                value={load.id}
+                onChange={(e) => {
+                  const selected = loadsList.find(l => l.id === e.target.value);
+                  if (selected) {
+                    setLoad(selected);
+                    setRankedDrivers([]);
+                    setAiResults({});
+                  }
+                }}
+              >
+                {loadsList.map(l => (
+                  <option key={l.id} value={l.id}>
+                    {l.pickup_name || l.origin} → {l.dropoff_name || l.destination} ({new Date(l.pickup_time || l.pickupTime).toLocaleString()})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {/* Load card */}
           <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 mb-5">
             <div className="flex items-start justify-between mb-3">
