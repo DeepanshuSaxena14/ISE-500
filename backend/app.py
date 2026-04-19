@@ -6,8 +6,18 @@ from typing import Dict, List, Optional
 from uuid import uuid4
 
 from flask import Flask, jsonify, request
+from flask_cors import CORS
+import os
+import sys
+
+# Add the current directory to sys.path so we can import 'ai'
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+from ai.service import process_dispatch_query
 
 app = Flask(__name__)
+# Enable CORS for all routes to allow connection from frontend (port 5173)
+CORS(app)
 
 
 # ============================================================
@@ -643,6 +653,27 @@ def get_top_load_recommendation(load_id: str):
 
 
 # ============================================================
+# AI Chat Endpoint
+# ============================================================
+
+@app.route('/api/chat', methods=['POST'])
+def chat():
+    data = request.get_json(force=True) or {}
+    question = data.get('question', '')
+    history = data.get('history', [])
+
+    if not question:
+        return jsonify({"error": "No question provided"}), 400
+
+    try:
+        # Resolve the query using the LLM-driven dispatch service
+        response = process_dispatch_query(question, context={"history": history})
+        return jsonify(response)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ============================================================
 # Optional seed data for local testing
 # ============================================================
 
@@ -785,6 +816,25 @@ def seed_demo_data():
     for item in performance_payload["data"]:
         perf = normalize_performance(item)
         PERFORMANCE[perf.driver_id] = perf
+
+    # Seed a demo load
+    demo_load = LoadRecord(
+        id="LD-4821",
+        pickup_name="Pueblo Warehouse",
+        pickup_address="123 Industrial Way, Pueblo, CO",
+        pickup_lat=38.2544,
+        pickup_lng=-104.6091,
+        dropoff_name="LA Port Terminal",
+        dropoff_address="456 Harbor Blvd, Los Angeles, CA",
+        dropoff_lat=33.7701,
+        dropoff_lng=-118.1937,
+        pickup_time="Today 14:00",
+        dropoff_time="Tomorrow 08:00",
+        required_trailer_type="VAN",
+        required_vehicle_type="TRUCK",
+        created_at=now_iso()
+    )
+    LOADS[demo_load.id] = demo_load
 
 
 seed_demo_data()

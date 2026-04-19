@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { chatService } from "../api";
 
-// ─── FLEET CONTEXT (mirrors fleet-dashboard data) ─────────────────────────
+// ─── FLEET CONTEXT (Initial placeholders, real data comes from backend) ──
 const FLEET = [
   { id:"D-001", name:"Marcus Rivera",   truck:"TRK-114", location:"I-10 E, Lordsburg NM",    status:"En Route",  hos:9.5,  load:{id:"LD-4821", origin:"Phoenix AZ",     dest:"Dallas TX",      progress:34, deadline:"Tomorrow 07:42"}, speed:67, fuel:71,  onTime:96, cpm:2.61, alerts:[] },
   { id:"D-002", name:"Sandra Kim",      truck:"TRK-089", location:"Tempe AZ — Truck Stop",   status:"On Break",  hos:7.2,  load:{id:"LD-4798", origin:"LA CA",           dest:"Albuquerque NM", progress:0,  deadline:"Pending"},         speed:0,  fuel:52,  onTime:98, cpm:2.68, alerts:["Break ends in 22 min"] },
@@ -22,50 +23,6 @@ const SUGGESTED = [
   "Who's running low on fuel and still en route?",
   "Rank available drivers for a load from Tucson to LA",
 ];
-
-const SYSTEM_PROMPT = `You are DispatchIQ, an AI dispatch assistant for a trucking fleet operations center. You help fleet dispatchers make fast, data-driven decisions.
-
-Current fleet snapshot (live data):
-${FLEET.map(d => `
-Driver: ${d.name} (${d.id}) | Truck: ${d.truck}
-  Status: ${d.status} | Location: ${d.location}
-  HOS Remaining: ${d.hos}h | Speed: ${d.speed}mph | Fuel: ${d.fuel}%
-  On-Time Rate: ${d.onTime}% | Est. CPM: $${d.cpm}
-  Active Load: ${d.load ? `${d.load.id} — ${d.load.origin} → ${d.load.dest} (${d.load.progress}% complete, deadline: ${d.load.deadline})` : "None"}
-  Alerts: ${d.alerts.length ? d.alerts.join("; ") : "None"}
-`).join("")}
-
-Rules for your responses:
-1. Be concise, direct, and decisive — dispatchers are busy. No filler phrases.
-2. Always lead with the answer, then the reasoning.
-3. When recommending drivers, rank them and explain why briefly.
-4. Flag compliance risks (HOS, fuel) proactively.
-5. Format your responses using this EXACT JSON structure — no markdown, no prose outside JSON:
-
-{
-  "headline": "Short one-line answer (under 10 words)",
-  "summary": "2-3 sentence explanation with key reasoning",
-  "type": "info|alert|recommendation|ranking|status",
-  "drivers": [
-    {
-      "id": "D-001",
-      "name": "Driver Name",
-      "rank": 1,
-      "tag": "Recommended|At Risk|Available|Delayed|Off Duty",
-      "tagColor": "green|amber|red|blue|gray",
-      "note": "One short sentence about this driver specifically"
-    }
-  ],
-  "tableRows": [
-    { "label": "column label", "value": "data value" }
-  ],
-  "actions": [
-    { "label": "Action Button Text", "type": "primary|secondary|danger" }
-  ],
-  "severity": "normal|warning|critical"
-}
-
-Only include "drivers" if the query is about specific drivers. Only include "tableRows" for summary/stats queries. Only include "actions" when a clear next step exists. The "drivers" array should have at most 4 entries.`;
 
 // ─── UTILITIES ────────────────────────────────────────────────────────────
 function timeStr() {
@@ -143,7 +100,7 @@ function DriverChip({ driver }) {
   );
 }
 
-function AIMessageCard({ msg }) {
+function AIMessageCard({ msg, onAction }) {
   const data = msg.parsed;
   if (!data) return null;
 
@@ -198,7 +155,14 @@ function AIMessageCard({ msg }) {
           {data.actions.map((action, i) => {
             const s = BTN_STYLES[action.type] || BTN_STYLES.secondary;
             return (
-              <button key={i} style={{ fontSize: 10, fontWeight: 600, padding: "5px 12px", borderRadius: 6, cursor: "pointer", background: s.bg, color: s.color, border: s.border, transition: "opacity .15s" }}
+              <button 
+                key={i} 
+                className="action-btn"
+                onClick={() => {
+                  console.log("Action button clicked:", action.label);
+                  if (onAction) onAction(action.label);
+                }}
+                style={{ fontSize: 10, fontWeight: 600, padding: "5px 12px", borderRadius: 6, cursor: "pointer", background: s.bg, color: s.color, border: s.border, transition: "opacity .15s" }}
                 onMouseEnter={e => e.target.style.opacity = ".8"}
                 onMouseLeave={e => e.target.style.opacity = "1"}
               >
@@ -266,7 +230,11 @@ export default function AIChatAssistant() {
 
   const sendMessage = useCallback(async (text) => {
     const userText = text || input.trim();
-    if (!userText || loading) return;
+    console.log("sendMessage called with:", userText);
+    if (!userText || loading) {
+      console.log("sendMessage blocked:", { userText, loading });
+      return;
+    }
     setInput("");
     setShowSuggested(false);
 
@@ -277,14 +245,7 @@ export default function AIChatAssistant() {
     const newHistory = [...conversationHistory, { role: "user", content: userText }];
 
     try {
-      const response = await fetch("http://localhost:5001/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: userText, history: newHistory })
-      });
-      
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Failed to communicate with AI layer");
+      const data = await chatService.sendMessage(userText, newHistory);
 
       const rawAnswer = data.answer || "I'm having trouble retrieving that information.";
       const intentHeadline = data.intent ? data.intent.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : "Chat Response";
@@ -294,7 +255,14 @@ export default function AIChatAssistant() {
         summary: rawAnswer,
         type: (data.intent || "").includes('alert') ? 'alert' : 'info',
         severity: "normal",
-        drivers: [],
+        drivers: (data.data?.drivers || []).map((d, i) => ({
+          id: d.id,
+          name: d.name,
+          rank: i + 1,
+          tag: d.status || "Available",
+          tagColor: d.status === "At Risk" ? "amber" : "green",
+          note: d.reason || ""
+        })),
         tableRows: [],
         actions: (data.suggested_followups || []).map(f => ({ label: f, type: "secondary" }))
       };
@@ -364,7 +332,7 @@ export default function AIChatAssistant() {
                 </div>
               ) : (
                 <div style={{ width: "100%", maxWidth: 680 }}>
-                  {msg.parsed ? <AIMessageCard msg={msg} /> : (
+                  {msg.parsed ? <AIMessageCard msg={msg} onAction={sendMessage} /> : (
                     <div style={{ fontSize: 12, color: "rgba(255,255,255,.6)", padding: "9px 13px", background: "rgba(255,255,255,.03)", border: "0.5px solid rgba(255,255,255,.08)", borderRadius: 10 }}>{msg.text}</div>
                   )}
                 </div>

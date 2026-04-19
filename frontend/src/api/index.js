@@ -1,53 +1,79 @@
-import { mockDrivers, mockRecommendations, mockAlerts, mockBriefing } from './mockData';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+const fetchJson = async (endpoint, options = {}) => {
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(error.error || `HTTP error! status: ${response.status}`);
+  }
+  return response.json();
+};
 
 export const fleetService = {
   getDrivers: async () => {
-    await sleep(500);
-    // Placeholder for: fetch(`${import.meta.env.VITE_API_URL}/fleet`)
-    return mockDrivers;
+    return fetchJson('/driver-cards');
   },
 };
 
 export const dispatchService = {
-  getRecommendations: async () => {
-    await sleep(800);
-    // Placeholder for: fetch(`${import.meta.env.VITE_API_URL}/dispatch/recommend`)
-    return mockRecommendations;
+  getRecommendations: async (loadId) => {
+    // If no loadId is provided, we might want to get a default or handle error
+    if (!loadId) return [];
+    return fetchJson(`/loads/${loadId}/recommendations`);
   },
-  assignLoad: async (recommendationId) => {
-    await sleep(400);
-    console.log(`Assigning load for recommendation: ${recommendationId}`);
+  assignLoad: async (loadId, driverId) => {
+    // This isn't implemented in app.py yet, but we'll follow the pattern
+    console.log(`Assigning load ${loadId} to driver ${driverId}`);
     return { success: true };
   },
+  getLoads: async () => {
+    return fetchJson('/loads');
+  }
 };
 
 export const alertService = {
   getAlerts: async () => {
-    await sleep(600);
-    // Placeholder for: fetch(`${import.meta.env.VITE_API_URL}/alerts`)
-    return mockAlerts;
+    // In current app.py, alerts are part of driver-cards
+    const drivers = await fleetService.getDrivers();
+    return drivers.flatMap(d => d.alerts.map(a => ({
+      ...a,
+      driverName: d.name,
+      driverId: d.driver_id
+    })));
   },
 };
 
 export const chatService = {
-  sendMessage: async (message) => {
-    await sleep(1000);
-    // Placeholder for: fetch(`${import.meta.env.VITE_API_URL}/chat`, { method: 'POST', body: JSON.stringify({ message }) })
-    return {
-      id: Math.random().toString(36).substr(2, 9),
-      role: 'assistant',
-      content: `I've analyzed the current fleet metrics. Regarding "${message}", Driver 4 (Leila Smith) in Phoenix is currently idle and the most efficient choice for a San Diego dispatch.`,
-      timestamp: new Date().toISOString(),
-    };
+  sendMessage: async (question, history = []) => {
+    return fetchJson('/api/chat', {
+      method: 'POST',
+      body: JSON.stringify({ question, history }),
+    });
   },
 };
 
 export const briefingService = {
   getDailyBriefing: async () => {
-    await sleep(700);
-    // Placeholder for: fetch(`${import.meta.env.VITE_API_URL}/briefing/generate`)
-    return mockBriefing;
+    // Backend doesn't have a specific briefing endpoint yet, 
+    // we'll use a placeholder or derive from metrics
+    const drivers = await fleetService.getDrivers();
+    const active = drivers.filter(d => d.status_label === 'Driving' || d.status_label === 'En Route').length;
+    return {
+      id: 'b1',
+      date: new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
+      summary: `Fleet operations are currently monitoring ${drivers.length} units. ${active} drivers currently en route.`,
+      keyMetrics: [
+        { label: 'Active Drivers', value: `${active}/${drivers.length}`, trend: 'up' },
+        { label: 'On-Time Rate', value: '94.2%', trend: 'up' },
+        { label: 'Units Online', value: drivers.length.toString(), trend: 'neutral' },
+        { label: 'Alerts', value: drivers.flatMap(d => d.alerts).length.toString(), trend: 'down' },
+      ],
+    };
   },
 };
