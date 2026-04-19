@@ -96,13 +96,11 @@ function DriverCard({ driver, rank, selected, onClick, aiResult, loading }) {
       className={`relative rounded-xl border cursor-pointer transition-all duration-200 overflow-hidden
         ${selected ? "border-teal-400/60 bg-teal-900/20 shadow-lg shadow-teal-900/20" : `${borderColors[rank]} bg-white/[0.03] hover:bg-white/[0.06]`}`}
     >
-      {/* Rank badge */}
       <div className={`absolute top-3 right-3 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${rankColors[rank]}`}>
         {rankLabels[rank]}
       </div>
 
       <div className="p-4">
-        {/* Header */}
         <div className="flex items-start gap-3 mb-3">
           <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-sm font-bold flex-shrink-0
             ${rank === 0 ? "bg-teal-500/20 text-teal-300" : "bg-white/10 text-white/70"}`}>
@@ -114,7 +112,6 @@ function DriverCard({ driver, rank, selected, onClick, aiResult, loading }) {
           </div>
         </div>
 
-        {/* Stats row */}
         <div className="flex gap-2 mb-3 flex-wrap">
           <StatPill label="HOS left" value={`${driver.hosRemaining}h`} warn={!hosOk} />
           <StatPill label="To pickup" value={`${driver.distanceToPickup}mi`} />
@@ -123,7 +120,6 @@ function DriverCard({ driver, rank, selected, onClick, aiResult, loading }) {
           <StatPill label="Est. CPM" value={driver.estimatedCostPerMile.toFixed(2)} />
         </div>
 
-        {/* HOS bar */}
         <div className="mb-3">
           <div className="flex justify-between text-[10px] text-white/40 mb-1">
             <span>HOS available</span>
@@ -132,15 +128,14 @@ function DriverCard({ driver, rank, selected, onClick, aiResult, loading }) {
           <ScoreBar value={driver.hosRemaining} max={11} color={!hosOk ? "amber" : "teal"} />
         </div>
 
-        {/* AI Reasoning */}
         <div className={`rounded-lg border p-3 mt-2 transition-all duration-300 min-h-[56px]
           ${selected ? "border-teal-500/30 bg-teal-900/20" : "border-white/8 bg-black/20"}`}>
           <div className="text-[10px] font-semibold text-white/40 uppercase tracking-wider mb-1.5">AI Reasoning</div>
           {loading ? (
             <div className="flex items-center gap-2">
               <div className="flex gap-1">
-                {[0,1,2].map(i => (
-                  <div key={i} className="w-1.5 h-1.5 rounded-full bg-teal-400/60 animate-bounce" style={{animationDelay:`${i*0.15}s`}} />
+                {[0, 1, 2].map(i => (
+                  <div key={i} className="w-1.5 h-1.5 rounded-full bg-teal-400/60 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
                 ))}
               </div>
               <span className="text-[11px] text-white/30">Analyzing driver profile...</span>
@@ -182,7 +177,7 @@ export default function SmartDispatch() {
     }
     setAnalysisPhase("");
 
-    const driversInfo = MOCK_DRIVERS.map((d, i) => `Driver ${i+1}: ${d.name} (${d.id})
+    const driversInfo = MOCK_DRIVERS.map((d, i) => `Driver ${i + 1}: ${d.name} (${d.id})
 - Location: ${d.location}, ${d.distanceToPickup} miles from pickup
 - HOS remaining: ${d.hosRemaining}h (need ${HOS_NEEDED}h minimum)
 - Fuel level: ${d.fuelLevel}%
@@ -217,21 +212,42 @@ Return ONLY a valid JSON object with this exact structure, no markdown, no expla
 
 Focus reasoning on: HOS fit, proximity to pickup, cost efficiency, on-time history, and any risks. Be specific and decisive.`;
 
-    try {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          messages: [{ role: "user", content: prompt }],
-        }),
-      });
+    const OPS_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
-      const data = await response.json();
-      const text = data.content?.map(b => b.text || "").join("") || "";
-      const clean = text.replace(/```json|```/g, "").trim();
-      const parsed = JSON.parse(clean);
+    try {
+      let parsed = null;
+
+      // Try Flask /loads/<id>/recommendations first (live backend)
+      const flaskRes = await fetch(`${OPS_URL}/loads/${LOAD.id}/recommendations`).catch(() => null);
+      if (flaskRes && flaskRes.ok) {
+        const flaskData = await flaskRes.json();
+        if (flaskData.recommendations && Array.isArray(flaskData.recommendations)) {
+          const ranking = flaskData.recommendations.map(r => r.driver_id || r.id).filter(Boolean);
+          const reasoning = {};
+          flaskData.recommendations.forEach(r => {
+            const id = r.driver_id || r.id;
+            if (id) reasoning[id] = r.reasoning || r.summary || "Recommended by dispatch engine.";
+          });
+          parsed = { ranking, reasoning };
+        }
+      }
+
+      // If Flask unavailable, fall back to direct Anthropic call
+      if (!parsed) {
+        const response = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "claude-sonnet-4-20250514",
+            max_tokens: 1000,
+            messages: [{ role: "user", content: prompt }],
+          }),
+        });
+        const data = await response.json();
+        const text = data.content?.map(b => b.text || "").join("") || "";
+        const clean = text.replace(/```json|```/g, "").trim();
+        parsed = JSON.parse(clean);
+      }
 
       // Reorder drivers by AI ranking
       const ordered = parsed.ranking.map(id => MOCK_DRIVERS.find(d => d.id === id)).filter(Boolean);
@@ -239,7 +255,6 @@ Focus reasoning on: HOS fit, proximity to pickup, cost efficiency, on-time histo
       setAiResults(parsed.reasoning || {});
       setSelectedDriver(ordered[0]?.id || null);
     } catch (e) {
-      // Fallback reasoning if API fails
       const fallback = {
         "D-001": "Marcus is the top pick — 18 miles from pickup with 9.5h HOS comfortably covers the 8.5h requirement, and his 96% on-time rate and lowest deadhead cost make him the most cost-efficient assignment.",
         "D-002": "Sandra has the highest on-time rate in the fleet at 98% and is only 22 miles out, but her 7.2h HOS is tighter and her fuel level at 52% will require a fill stop that adds cost.",
@@ -276,7 +291,6 @@ Focus reasoning on: HOS fit, proximity to pickup, cost efficiency, on-time histo
 
         {/* LEFT: drivers */}
         <div>
-          {/* Load card */}
           <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 mb-5">
             <div className="flex items-start justify-between mb-3">
               <div>
@@ -289,7 +303,7 @@ Focus reasoning on: HOS fit, proximity to pickup, cost efficiency, on-time histo
                   <span className="text-xl font-bold text-white tracking-tight">{LOAD.originShort}</span>
                   <div className="flex-1 flex items-center gap-1 px-2">
                     <div className="flex-1 h-px bg-white/20" />
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6h8M7 3l3 3-3 3" stroke="white" strokeOpacity=".5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6h8M7 3l3 3-3 3" stroke="white" strokeOpacity=".5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
                     <div className="flex-1 h-px bg-white/20" />
                   </div>
                   <span className="text-xl font-bold text-white tracking-tight">{LOAD.destinationShort}</span>
@@ -319,12 +333,11 @@ Focus reasoning on: HOS fit, proximity to pickup, cost efficiency, on-time histo
             </div>
           </div>
 
-          {/* Analysis overlay */}
           {overallLoading && (
             <div className="rounded-xl border border-teal-500/30 bg-teal-900/10 px-5 py-4 mb-4 flex items-center gap-3">
               <div className="flex gap-1 flex-shrink-0">
-                {[0,1,2,3].map(i => (
-                  <div key={i} className="w-1 h-4 bg-teal-400/70 rounded-full animate-bounce" style={{animationDelay:`${i*0.1}s`}} />
+                {[0, 1, 2, 3].map(i => (
+                  <div key={i} className="w-1 h-4 bg-teal-400/70 rounded-full animate-bounce" style={{ animationDelay: `${i * 0.1}s` }} />
                 ))}
               </div>
               <div>
@@ -334,7 +347,6 @@ Focus reasoning on: HOS fit, proximity to pickup, cost efficiency, on-time histo
             </div>
           )}
 
-          {/* Driver cards */}
           <div className="space-y-3">
             {rankedDrivers.map((driver, i) => (
               <DriverCard
@@ -353,7 +365,6 @@ Focus reasoning on: HOS fit, proximity to pickup, cost efficiency, on-time histo
         {/* RIGHT: action panel */}
         <div className="space-y-4">
 
-          {/* Run AI button */}
           <button
             onClick={runDispatch}
             disabled={overallLoading || dispatched}
@@ -368,7 +379,6 @@ Focus reasoning on: HOS fit, proximity to pickup, cost efficiency, on-time histo
             {overallLoading ? "ANALYZING FLEET..." : dispatched ? "DISPATCHED ✓" : hasResults ? "RE-RUN AI DISPATCH" : "▶  RUN AI DISPATCH"}
           </button>
 
-          {/* Selected driver confirmation */}
           {selectedInfo && !dispatched && (
             <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
               <div className="text-[10px] text-white/35 uppercase tracking-widest mb-3">Selected Assignment</div>
@@ -410,12 +420,11 @@ Focus reasoning on: HOS fit, proximity to pickup, cost efficiency, on-time histo
             </div>
           )}
 
-          {/* Dispatched confirmation */}
           {dispatched && selectedInfo && (
             <div className="rounded-xl border border-teal-400/40 bg-teal-900/20 p-4">
               <div className="flex items-center gap-2 mb-3">
                 <div className="w-5 h-5 rounded-full bg-teal-400 flex items-center justify-center flex-shrink-0">
-                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 2.5" stroke="black" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 2.5" stroke="black" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
                 </div>
                 <span className="text-sm font-bold text-teal-300">Load Assigned</span>
               </div>
@@ -423,12 +432,11 @@ Focus reasoning on: HOS fit, proximity to pickup, cost efficiency, on-time histo
                 {LOAD.id} dispatched to <strong className="text-teal-200">{selectedInfo.name}</strong> ({selectedInfo.truckId}). Notification sent. ETA calculated.
               </p>
               <div className="mt-3 pt-3 border-t border-teal-500/20 text-[11px] text-teal-300/50">
-                Dispatched at {new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+                Dispatched at {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </div>
             </div>
           )}
 
-          {/* Legend */}
           <div className="rounded-xl border border-white/8 bg-white/[0.02] p-4">
             <div className="text-[10px] text-white/30 uppercase tracking-widest mb-3">Scoring Factors</div>
             <div className="space-y-2">
@@ -450,14 +458,13 @@ Focus reasoning on: HOS fit, proximity to pickup, cost efficiency, on-time histo
             </div>
           </div>
 
-          {/* Cost summary */}
           {hasResults && !overallLoading && (
             <div className="rounded-xl border border-white/8 bg-white/[0.02] p-4">
               <div className="text-[10px] text-white/30 uppercase tracking-widest mb-3">Cost Comparison</div>
               <div className="space-y-2">
                 {rankedDrivers.map((d, i) => (
                   <div key={d.id} className={`flex items-center gap-2 text-[11px] p-1.5 rounded-md transition-colors ${selectedDriver === d.id ? "bg-teal-900/20" : ""}`}>
-                    <span className={`w-4 text-center font-bold ${i === 0 ? "text-teal-400" : "text-white/30"}`}>{i+1}</span>
+                    <span className={`w-4 text-center font-bold ${i === 0 ? "text-teal-400" : "text-white/30"}`}>{i + 1}</span>
                     <span className="text-white/60 flex-1 truncate">{d.name.split(" ")[0]}</span>
                     <span className={`font-semibold ${i === 0 ? "text-teal-300" : "text-white/50"}`}>${d.estimatedCostPerMile.toFixed(2)}/mi</span>
                     {i === 0 && <span className="text-[9px] text-teal-400 bg-teal-900/40 px-1.5 py-0.5 rounded">BEST</span>}

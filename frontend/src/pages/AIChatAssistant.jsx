@@ -2,14 +2,14 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 // ─── FLEET CONTEXT (mirrors fleet-dashboard data) ─────────────────────────
 const FLEET = [
-  { id:"D-001", name:"Marcus Rivera",   truck:"TRK-114", location:"I-10 E, Lordsburg NM",    status:"En Route",  hos:9.5,  load:{id:"LD-4821", origin:"Phoenix AZ",     dest:"Dallas TX",      progress:34, deadline:"Tomorrow 07:42"}, speed:67, fuel:71,  onTime:96, cpm:2.61, alerts:[] },
-  { id:"D-002", name:"Sandra Kim",      truck:"TRK-089", location:"Tempe AZ — Truck Stop",   status:"On Break",  hos:7.2,  load:{id:"LD-4798", origin:"LA CA",           dest:"Albuquerque NM", progress:0,  deadline:"Pending"},         speed:0,  fuel:52,  onTime:98, cpm:2.68, alerts:["Break ends in 22 min"] },
-  { id:"D-003", name:"James Okafor",    truck:"TRK-201", location:"US-60 W, Globe AZ",       status:"En Route",  hos:2.1,  load:{id:"LD-4809", origin:"Albuquerque NM",  dest:"Phoenix AZ",     progress:71, deadline:"Today 18:30"},      speed:58, fuel:29,  onTime:88, cpm:2.74, alerts:["HOS critical — 2.1h remaining","Fuel below 30%"] },
-  { id:"D-004", name:"Tanya Reyes",     truck:"TRK-177", location:"Tucson AZ — Delivered",   status:"Available", hos:10.0, load:null,                                                                                                       speed:0,  fuel:91,  onTime:93, cpm:2.79, alerts:[] },
-  { id:"D-005", name:"Devon Carter",    truck:"TRK-033", location:"I-40 W, Gallup NM",       status:"En Route",  hos:5.5,  load:{id:"LD-4815", origin:"Albuquerque NM",  dest:"Flagstaff AZ",   progress:55, deadline:"Today 21:15"},      speed:62, fuel:48,  onTime:81, cpm:2.74, alerts:["Running 47 min behind schedule","Wind advisory on I-40"] },
-  { id:"D-006", name:"Priya Nair",      truck:"TRK-158", location:"Phoenix AZ — Yard",       status:"Off Duty",  hos:0,    load:null,                                                                                                       speed:0,  fuel:64,  onTime:95, cpm:2.65, alerts:["34h reset — available tomorrow 09:00"] },
-  { id:"D-007", name:"Luis Mendoza",    truck:"TRK-092", location:"I-17 N, Camp Verde AZ",   status:"En Route",  hos:6.8,  load:{id:"LD-4822", origin:"Phoenix AZ",     dest:"Flagstaff AZ",   progress:62, deadline:"Today 16:50"},      speed:71, fuel:83,  onTime:92, cpm:2.68, alerts:[] },
-  { id:"D-008", name:"Rachel Stone",    truck:"TRK-245", location:"US-93 N, Wikieup AZ",     status:"En Route",  hos:8.3,  load:{id:"LD-4817", origin:"Phoenix AZ",     dest:"Las Vegas NV",   progress:28, deadline:"Today 20:10"},      speed:65, fuel:77,  onTime:94, cpm:2.71, alerts:[] },
+  { id: "D-001", name: "Marcus Rivera", truck: "TRK-114", location: "I-10 E, Lordsburg NM", status: "En Route", hos: 9.5, load: { id: "LD-4821", origin: "Phoenix AZ", dest: "Dallas TX", progress: 34, deadline: "Tomorrow 07:42" }, speed: 67, fuel: 71, onTime: 96, cpm: 2.61, alerts: [] },
+  { id: "D-002", name: "Sandra Kim", truck: "TRK-089", location: "Tempe AZ — Truck Stop", status: "On Break", hos: 7.2, load: { id: "LD-4798", origin: "LA CA", dest: "Albuquerque NM", progress: 0, deadline: "Pending" }, speed: 0, fuel: 52, onTime: 98, cpm: 2.68, alerts: ["Break ends in 22 min"] },
+  { id: "D-003", name: "James Okafor", truck: "TRK-201", location: "US-60 W, Globe AZ", status: "En Route", hos: 2.1, load: { id: "LD-4809", origin: "Albuquerque NM", dest: "Phoenix AZ", progress: 71, deadline: "Today 18:30" }, speed: 58, fuel: 29, onTime: 88, cpm: 2.74, alerts: ["HOS critical — 2.1h remaining", "Fuel below 30%"] },
+  { id: "D-004", name: "Tanya Reyes", truck: "TRK-177", location: "Tucson AZ — Delivered", status: "Available", hos: 10.0, load: null, speed: 0, fuel: 91, onTime: 93, cpm: 2.79, alerts: [] },
+  { id: "D-005", name: "Devon Carter", truck: "TRK-033", location: "I-40 W, Gallup NM", status: "En Route", hos: 5.5, load: { id: "LD-4815", origin: "Albuquerque NM", dest: "Flagstaff AZ", progress: 55, deadline: "Today 21:15" }, speed: 62, fuel: 48, onTime: 81, cpm: 2.74, alerts: ["Running 47 min behind schedule", "Wind advisory on I-40"] },
+  { id: "D-006", name: "Priya Nair", truck: "TRK-158", location: "Phoenix AZ — Yard", status: "Off Duty", hos: 0, load: null, speed: 0, fuel: 64, onTime: 95, cpm: 2.65, alerts: ["34h reset — available tomorrow 09:00"] },
+  { id: "D-007", name: "Luis Mendoza", truck: "TRK-092", location: "I-17 N, Camp Verde AZ", status: "En Route", hos: 6.8, load: { id: "LD-4822", origin: "Phoenix AZ", dest: "Flagstaff AZ", progress: 62, deadline: "Today 16:50" }, speed: 71, fuel: 83, onTime: 92, cpm: 2.68, alerts: [] },
+  { id: "D-008", name: "Rachel Stone", truck: "TRK-245", location: "US-93 N, Wikieup AZ", status: "En Route", hos: 8.3, load: { id: "LD-4817", origin: "Phoenix AZ", dest: "Las Vegas NV", progress: 28, deadline: "Today 20:10" }, speed: 65, fuel: 77, onTime: 94, cpm: 2.71, alerts: [] },
 ];
 
 const SUGGESTED = [
@@ -97,10 +97,10 @@ function parseAIResponse(raw) {
 
 const TAG_COLORS = {
   green: { bg: "rgba(52,211,153,.12)", border: "rgba(52,211,153,.3)", text: "#34d399" },
-  amber: { bg: "rgba(251,191,36,.12)", border: "rgba(251,191,36,.3)",  text: "#fbbf24" },
-  red:   { bg: "rgba(248,113,113,.12)",border: "rgba(248,113,113,.3)", text: "#f87171" },
-  blue:  { bg: "rgba(96,165,250,.12)", border: "rgba(96,165,250,.3)",  text: "#60a5fa" },
-  gray:  { bg: "rgba(107,114,128,.12)",border: "rgba(107,114,128,.3)", text: "#9ca3af" },
+  amber: { bg: "rgba(251,191,36,.12)", border: "rgba(251,191,36,.3)", text: "#fbbf24" },
+  red: { bg: "rgba(248,113,113,.12)", border: "rgba(248,113,113,.3)", text: "#f87171" },
+  blue: { bg: "rgba(96,165,250,.12)", border: "rgba(96,165,250,.3)", text: "#60a5fa" },
+  gray: { bg: "rgba(107,114,128,.12)", border: "rgba(107,114,128,.3)", text: "#9ca3af" },
 };
 
 function DriverChip({ driver }) {
@@ -153,9 +153,9 @@ function AIMessageCard({ msg }) {
   const typeColor = { info: "#60a5fa", alert: "#f87171", recommendation: "#34d399", ranking: "#a78bfa", status: "#fbbf24" }[data.type] || "#60a5fa";
 
   const BTN_STYLES = {
-    primary:   { bg: "#1d9e75", color: "#000", border: "none" },
+    primary: { bg: "#1d9e75", color: "#000", border: "none" },
     secondary: { bg: "rgba(255,255,255,.07)", color: "rgba(255,255,255,.7)", border: "0.5px solid rgba(255,255,255,.12)" },
-    danger:    { bg: "rgba(248,113,113,.12)", color: "#f87171", border: "0.5px solid rgba(248,113,113,.25)" },
+    danger: { bg: "rgba(248,113,113,.12)", color: "#f87171", border: "0.5px solid rgba(248,113,113,.25)" },
   };
 
   return (
@@ -238,12 +238,57 @@ export default function AIChatAssistant() {
   const [loading, setLoading] = useState(false);
   const [showSuggested, setShowSuggested] = useState(true);
   const [conversationHistory, setConversationHistory] = useState([]);
+  const [isAudioLoading, setIsAudioLoading] = useState(null); // stores message index or 'briefing' etc
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
+
+  // ─── AUDIO UTILITY ──────────────────────────────────────────────────────
+  const playAudioFromText = async (text, id = 'manual') => {
+    if (!text) return;
+    setIsAudioLoading(id);
+    try {
+      const resp = await fetch("http://localhost:5001/api/voice/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text })
+      });
+      if (!resp.ok) throw new Error("TTS failed");
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.onended = () => setIsAudioLoading(null);
+      await audio.play();
+    } catch (err) {
+      console.error("Audio Playback Error:", err);
+      setIsAudioLoading(null);
+    }
+  };
+
+  const handleBriefing = async (type) => {
+    const prompt = type === 'fleet' 
+      ? "Give me a very concise 2-sentence fleet status overview for an operational voice briefing."
+      : "Summarize the top 2 most urgent critical alerts in 2 short sentences for a voice briefing.";
+    
+    setIsAudioLoading(type);
+    try {
+      const resp = await fetch("http://localhost:5001/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: prompt, history: [] })
+      });
+      const data = await resp.json();
+      if (data.answer) {
+        await playAudioFromText(data.answer, type);
+      }
+    } catch (err) {
+      console.error("Briefing Error:", err);
+      setIsAudioLoading(null);
+    }
+  };
 
   // Welcome message on mount
   useEffect(() => {
@@ -277,18 +322,19 @@ export default function AIChatAssistant() {
     const newHistory = [...conversationHistory, { role: "user", content: userText }];
 
     try {
-      const response = await fetch("http://localhost:5001/api/chat", {
+      const AI_URL = import.meta.env.VITE_AI_URL || "http://localhost:5001";
+      const response = await fetch(`${AI_URL}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: userText, history: newHistory })
       });
-      
+
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Failed to communicate with AI layer");
 
       const rawAnswer = data.answer || "I'm having trouble retrieving that information.";
       const intentHeadline = data.intent ? data.intent.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : "Chat Response";
-      
+
       const parsed = {
         headline: intentHeadline,
         summary: rawAnswer,
@@ -304,10 +350,10 @@ export default function AIChatAssistant() {
       setConversationHistory([...newHistory, { role: "assistant", content: rawAnswer }]);
     } catch (err) {
       console.error(err);
-      
+
       const errorMsg = err.message || "Cannot connect to the AI backend. Please ensure the Flask server is running on port 5001.";
       const isConnectionError = errorMsg.includes("Failed to fetch") || errorMsg.includes("Cannot connect");
-      
+
       const parsed = {
         headline: isConnectionError ? "Backend Offline" : "API Integration Error",
         summary: errorMsg,
@@ -342,17 +388,59 @@ export default function AIChatAssistant() {
 
       <div className="flex-1 flex flex-col min-h-0 bg-white/[0.02] border border-white/[0.05] rounded-2xl p-6 overflow-hidden relative">
         {/* ── MESSAGES ── */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "16px 0", display: "flex", flexDirection: "column", gap: 12 }}>
+        
+        {/* Voice Dashboard */}
+        <div style={{ background: "rgba(29,158,117,.03)", border: "0.5px solid rgba(29,158,117,.15)", borderRadius: 12, padding: "14px", marginBottom: 20, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ width: 28, height: 28, borderRadius: "50%", background: "#1d9e75", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>🎙️</div>
+            <div>
+              <h4 style={{ margin: 0, fontSize: 12, color: "#f1f5f9" }}>Voice Copilot</h4>
+              <p style={{ margin: 0, fontSize: 9, color: "rgba(255,255,255,.3)" }}>Hands-busy briefings</p>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button 
+              onClick={() => handleBriefing('fleet')}
+              disabled={isAudioLoading !== null}
+              style={{ background: "rgba(255,255,255,.05)", border: "0.5px solid rgba(255,255,255,.1)", borderRadius: 6, color: "#f1f5f9", fontSize: 9, fontWeight: 600, padding: "5px 10px", cursor: "pointer", transition: "all 0.2s", display: "flex", alignItems: "center", gap: 6 }}
+              onMouseEnter={e => e.target.style.background = "rgba(255,255,255,.1)"}
+              onMouseLeave={e => e.target.style.background = "rgba(255,255,255,.05)"}
+            >
+              {isAudioLoading === 'fleet' ? "⌛" : "▶"} Play Fleet Briefing
+            </button>
+            <button 
+              onClick={() => handleBriefing('alerts')}
+              disabled={isAudioLoading !== null}
+              style={{ background: "rgba(248,113,113,.08)", border: "0.5px solid rgba(248,113,113,.15)", borderRadius: 6, color: "#f87171", fontSize: 9, fontWeight: 600, padding: "5px 10px", cursor: "pointer", transition: "all 0.2s", display: "flex", alignItems: "center", gap: 6 }}
+              onMouseEnter={e => e.target.style.background = "rgba(248,113,113,.12)"}
+              onMouseLeave={e => e.target.style.background = "rgba(248,113,113,.08)"}
+            >
+              {isAudioLoading === 'alerts' ? "⌛" : "⚠"} Play Critical Alerts
+            </button>
+          </div>
+        </div>
+
+        <div style={{ flex: 1, overflowY: "auto", padding: "10px 0", display: "flex", flexDirection: "column", gap: 12 }}>
 
           {messages.map((msg) => (
             <div key={msg.id} className="msg-in" style={{ display: "flex", flexDirection: "column", alignItems: msg.role === "user" ? "flex-end" : "flex-start", gap: 4 }}>
               {/* Sender row */}
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                {msg.role === "ai" && (
-                  <div style={{ width: 22, height: 22, borderRadius: 5, background: "rgba(29,158,117,.15)", border: "0.5px solid rgba(29,158,117,.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8, fontWeight: 700, color: "#34d399", letterSpacing: "0.05em" }}>AI</div>
-                )}
-                <span style={{ fontSize: 9, color: "rgba(255,255,255,.25)" }}>{msg.role === "ai" ? "DispatchIQ" : "You"} · {msg.time}</span>
-                {msg.role === "user" && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    {msg.role === "ai" && (
+                      <div style={{ width: 22, height: 22, borderRadius: 5, background: "rgba(29,158,117,.15)", border: "0.5px solid rgba(29,158,117,.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8, fontWeight: 700, color: "#34d399", letterSpacing: "0.05em" }}>AI</div>
+                    )}
+                    <span style={{ fontSize: 9, color: "rgba(255,255,255,.25)" }}>{msg.role === "ai" ? "DispatchIQ" : "You"} · {msg.time}</span>
+                    {msg.role === "ai" && (
+                      <button 
+                        onClick={() => playAudioFromText(msg.text || (msg.parsed && msg.parsed.summary), msg.id)}
+                        disabled={isAudioLoading !== null}
+                        style={{ background: "none", border: "none", cursor: "pointer", color: isAudioLoading === msg.id ? "#34d399" : "rgba(255,255,255,.15)", fontSize: 11, padding: 0, marginLeft: 2, display: "flex", alignItems: "center", transition: "color 0.2s" }}
+                        title="Speak response"
+                      >
+                        {isAudioLoading === msg.id ? "⌛" : "🔊"}
+                      </button>
+                    )}
+                    {msg.role === "user" && (
                   <div style={{ width: 22, height: 22, borderRadius: 5, background: "rgba(255,255,255,.07)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8, fontWeight: 700, color: "rgba(255,255,255,.5)" }}>ME</div>
                 )}
               </div>

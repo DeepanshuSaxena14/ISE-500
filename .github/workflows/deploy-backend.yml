@@ -1,7 +1,9 @@
 # ================================================================
 # DispatchIQ — Backend Deploy (Railway)
-# Triggers on push to main branch only.
-# Deploys the FastAPI backend to Railway.
+# Triggers on every push to main that touches backend/ files.
+# Deploys TWO Railway services:
+#   1. dispatchiq-api   → python app.py        (port 8000)
+#   2. dispatchiq-chat  → python chat_service.py (port 5001)
 # ================================================================
 
 name: Deploy Backend
@@ -15,8 +17,8 @@ on:
       - ".github/workflows/deploy-backend.yml"
 
 jobs:
-  deploy:
-    name: Deploy to Railway
+  deploy-api:
+    name: Deploy Fleet API → Railway
     runs-on: ubuntu-latest
 
     steps:
@@ -26,12 +28,38 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
-      - name: Deploy to Railway
+      - name: Deploy dispatchiq-api (app.py)
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
           cd backend
-          railway up --service dispatchiq-backend --detach
+          railway up \
+            --service dispatchiq-api \
+            --detach
+        # Railway picks up backend/railway-api.json for start command
 
-      - name: Confirm deployment
-        run: echo "Backend deployed to Railway at $(date -u)"
+      - name: Confirm
+        run: echo "Fleet API deployed at $(date -u)"
+
+  deploy-chat:
+    name: Deploy AI Chat → Railway
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy dispatchiq-chat (chat_service.py)
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          cd backend
+          railway up \
+            --service dispatchiq-chat \
+            --detach
+
+      - name: Confirm
+        run: echo "AI Chat service deployed at $(date -u)"
