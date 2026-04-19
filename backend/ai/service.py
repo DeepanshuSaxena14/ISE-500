@@ -19,22 +19,13 @@ from .handlers.dispatch import (
 
 def _build_provider():
     """
-    Try the live API provider first. If it can't reach the ops backend,
-    fall back to the mock provider so chat never goes dark during demo.
+    Return the live APIFleetProvider. The provider itself handles individual request 
+    failures gracefully by returning empty/default data, preventing hard crashes.
     """
-    api = APIFleetProvider()
-    try:
-        summary = api.get_fleet_summary()
-        if summary.get("total_drivers", 0) > 0:
-            print("[service] Using live APIFleetProvider — backend reachable")
-            return api
-    except Exception as e:
-        print(f"[service] APIFleetProvider probe failed ({e}), falling back to mock")
-    print("[service] Using MockFleetProvider")
-    return MockFleetProvider()
+    return APIFleetProvider()
 
 
-# Provider is resolved once at module load; stays for the process lifetime.
+# Provider instance used by handlers.
 provider = _build_provider()
 
 

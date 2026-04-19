@@ -1,7 +1,8 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+const OPS_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+const AI_BASE_URL = import.meta.env.VITE_AI_URL || 'http://127.0.0.1:5001';
 
-const fetchJson = async (endpoint, options = {}) => {
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+const fetchJson = async (endpoint, options = {}, baseUrl = OPS_BASE_URL) => {
+  const response = await fetch(`${baseUrl}${endpoint}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -70,7 +71,7 @@ export const chatService = {
     return fetchJson('/api/chat', {
       method: 'POST',
       body: JSON.stringify({ question, history }),
-    });
+    }, AI_BASE_URL);
   },
 };
 
