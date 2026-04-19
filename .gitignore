@@ -40,3 +40,4 @@ backend/.env
 
 backend/.env
 .env
+.venv
