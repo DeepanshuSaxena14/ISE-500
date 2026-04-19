@@ -1,0 +1,44 @@
+version: "3.9"
+
+services:
+  # 1. Main Operational Backend (Handling Fleet Data)
+  backend-api:
+    build:
+      context: ./backend
+    container_name: dispatchiq-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    env_file:
+      - .env
+    command: python app.py
+
+  # 2. AI Chat Service (LLM Logic)
+  ai-chat:
+    build:
+      context: ./backend
+    container_name: dispatchiq-ai
+    ports:
+      - "5001:5001"
+    volumes:
+      - ./backend:/app
+    env_file:
+      - .env
+    command: python chat_service.py
+    depends_on:
+      - backend-api
+
+  # 3. Web Frontend (React/Vite)
+  frontend:
+    build:
+      context: ./frontend
+    container_name: dispatchiq-frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules # Prevents local node_modules from overwriting container ones
+    depends_on:
+      - ai-chat
+      - backend-api
