@@ -1,3 +1,11 @@
+# ================================================================
+# DispatchIQ — Backend Deploy (Railway)
+# Triggers on every push to main that touches backend/ files.
+# Deploys TWO Railway services:
+#   1. dispatchiq-api   → python app.py        (port 8000)
+#   2. dispatchiq-chat  → python chat_service.py (port 5001)
+# ================================================================
+
 name: Deploy Backend
 
 on:
@@ -23,6 +31,7 @@ jobs:
       - name: Deploy dispatchiq-api (app.py)
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
         run: |
           cd backend
           railway up \
@@ -46,6 +55,7 @@ jobs:
       - name: Deploy dispatchiq-chat (chat_service.py)
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
         run: |
           cd backend
           railway up \
