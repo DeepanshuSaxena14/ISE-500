@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import os
 import math
-import os
-import math
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,79 +17,8 @@ from flask_cors import CORS
 from supabase import Client, create_client
 
 from ai.tools.llm import generate_text
-from flask_cors import CORS
-from supabase import Client, create_client
-
-from ai.tools.llm import generate_text
 
 app = Flask(__name__)
-CORS(app)
-
-# ------------------------------------------------------------
-# Geospatial helpers
-# ------------------------------------------------------------
-
-CITY_COORDS = {
-    "Phoenix, AZ": (33.4484, -112.0740),
-    "Los Angeles, CA": (34.0522, -118.2437),
-    "Dallas, TX": (32.7767, -96.7970),
-    "Seattle, WA": (47.6062, -122.3321),
-    "Chicago, IL": (41.8781, -87.6298),
-    "Atlanta, GA": (33.7490, -84.3880),
-    "New York, NY": (40.7128, -74.0060),
-    "Miami, FL": (25.7617, -80.1918),
-    "Denver, CO": (39.7392, -104.9903),
-    "Salt Lake City, UT": (40.7608, -111.8910),
-}
-
-def haversine(lat1, lon1, lat2, lon2):
-    R = 3958.8 # Earth radius in miles
-    dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lon2 - lon1)
-    a = (math.sin(dlat / 2) ** 2 +
-         math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2)
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return R * c
-
-# ------------------------------------------------------------
-# .env diagnostics
-# ------------------------------------------------------------
-ENV_PATH = Path("/app/.env")
-cwd = Path.cwd()
-
-print("[startup] Current working directory:", cwd)
-print("[startup] Expected .env path:", ENV_PATH)
-print("[startup] .env exists:", ENV_PATH.exists())
-
-if ENV_PATH.exists():
-    print("[startup] .env file found, loading it now")
-    load_dotenv(dotenv_path=ENV_PATH)
-else:
-    print("[startup] .env file not found at /app/.env, trying default load_dotenv()")
-    load_dotenv()
-
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-PORT = int(os.getenv("PORT", "8000"))
-
-print("[startup] SUPABASE_URL present:", bool(SUPABASE_URL))
-print("[startup] SUPABASE_SERVICE_ROLE_KEY present:", bool(SUPABASE_SERVICE_ROLE_KEY))
-print("[startup] PORT:", PORT)
-
-if SUPABASE_URL:
-    print("[startup] SUPABASE_URL preview:", SUPABASE_URL[:40] + "...")
-else:
-    print("[startup] SUPABASE_URL is missing")
-
-if SUPABASE_SERVICE_ROLE_KEY:
-    print("[startup] SUPABASE_SERVICE_ROLE_KEY preview:", SUPABASE_SERVICE_ROLE_KEY[:8] + "..." + SUPABASE_SERVICE_ROLE_KEY[-4:])
-else:
-    print("[startup] SUPABASE_SERVICE_ROLE_KEY is missing")
-
-if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
-    raise RuntimeError("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env")
-
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 CORS(app)
 
 # ------------------------------------------------------------
@@ -180,8 +107,6 @@ class LoadRecord:
     dropoff_time: str
     required_trailer_type: Optional[str] = None
     required_vehicle_type: Optional[str] = "TRUCK"
-    weight_lbs: Optional[float] = 0.0
-    weight_lbs: Optional[float] = 0.0
     created_at: Optional[str] = None
 
 
@@ -490,7 +415,6 @@ def normalize_performance(item: dict) -> DriverPerformance:
 
 # ============================================================
 # Supabase fetch helpers
-# Supabase fetch helpers
 # ============================================================
 
 def fetch_all_drivers() -> list[DriverProfile]:
@@ -557,7 +481,6 @@ def fetch_load(load_id: str) -> Optional[LoadRecord]:
         dropoff_time=row["dropoff_time"],
         required_trailer_type=row.get("required_trailer_type"),
         required_vehicle_type=row.get("required_vehicle_type"),
-        weight_lbs=float(row.get("weight_lbs", 0.0) or 0.0),
         created_at=row.get("created_at"),
     )
 
@@ -814,11 +737,8 @@ def build_driver_card(candidate: DispatchCandidate, load: Optional[LoadRecord] =
         } if driver.current_load_id is not None else None,
         "hos_remaining_hours": hos_remaining,
         "distance_to_pickup": round(distance, 1),
-        "hos_remaining_hours": hos_remaining,
-        "distance_to_pickup": round(distance, 1),
         "load_progress_pct": progress_pct,
         "eta_label": format_eta_label(driver.current_load_delivery_date),
-        "fuel_pct": 80 - (driver.driver_id % 40), # Mocked but stable
         "fuel_pct": 80 - (driver.driver_id % 40), # Mocked but stable
         "alerts": alerts,
         "performance": {
@@ -905,119 +825,19 @@ def score_candidate(load: LoadRecord, candidate: DispatchCandidate) -> dict:
     else:
         warnings.append("No performance record found")
 
-    # 1. Timing Feasibility Check (Edge Case: Driver too far for appointment)
+    # Proximity Penalty
+    # We need to calculate distance here too to apply the penalty
     distance = 0.0
     if driver.last_known_location in CITY_COORDS:
         d_lat, d_lon = CITY_COORDS[driver.last_known_location]
         distance = haversine(d_lat, d_lon, load.pickup_lat, load.pickup_lng)
     
-    avg_speed = 55.0 # mph
-    transit_hours_required = distance / avg_speed
-    
-    try:
-        pickup_dt = datetime.fromisoformat(load.pickup_time.replace("Z", "+00:00"))
-        now_dt = datetime.now(timezone.utc)
-        time_until_pickup = (pickup_dt - now_dt).total_seconds() / 3600.0
-    except:
-        time_until_pickup = 100.0 # Fallback
-
-    if transit_hours_required > time_until_pickup:
-        score -= 80
-        warnings.append(f"INFEASIBLE: Arrival estimate ({transit_hours_required:.1f}h) exceeds pickup window ({time_until_pickup:.1f}h)")
-    else:
-        reasons.append(f"Timing is feasible: {transit_hours_required:.1f}h vs {time_until_pickup:.1f}h")
-
-    # 2. Sequential & Consolidation Logic (Edge Case: On-Duty but fits/near)
-    is_on_duty = driver.work_status in {"ON_DUTY", "IN_TRANSIT", "DRIVING"}
-    
-    if is_on_duty:
-        # Check Deviation Delta
-        if distance < 30: # If passing right by
-            score += 25
-            reasons.append(f"Strategic Pick: Driver is currently on-duty but passing near pickup ({distance:.1f} mi)")
-        
-        # Check Consolidation Capacity (Mocking current load weight as 20k for now if on-duty)
-        max_capacity = vehicle.gross_vehicle_weight - 35000 if vehicle and vehicle.gross_vehicle_weight else 45000
-        assumed_current_weight = 20000 
-        new_load_weight = load.weight_lbs or 0.0
-        
-        if (assumed_current_weight + new_load_weight) <= max_capacity:
-            score += 15
-            reasons.append(f"LTL Opportunity: Vehicle has capacity for consolidation ({new_load_weight} lbs)")
-        else:
-            score -= 20
-            warnings.append(f"Overweight Risk: Consolidation exceeds vehicle capacity")
-
-    # 3. Proximity Scaling
-    if distance > 350:
-        penalty = min(30, (distance - 350) / 15)
+    if distance > 250:
+        penalty = min(20, (distance - 250) / 25)
         score -= penalty
-        warnings.append(f"High Deadhead: Driver is {distance:.1f} mi away")
-    elif distance < 50:
-        score += 10
-        reasons.append(f"Local Favorite: Driver is within 50mi hub ({distance:.1f} mi)")
-
-    # HOS Penalty
-    hos_base = 11.0 if driver.work_status == "AVAILABLE" else 5.5
-    hos_remaining = max(0.0, hos_base - ((driver.driver_id % 10) * 0.5))
-    
-    if hos_remaining < 8.5:
-        score -= 15
-        warnings.append(f"HOS remaining is low: {hos_remaining:.1f}h")
+        warnings.append(f"Distance to pickup is high: {distance:.1f} mi")
     else:
-        reasons.append(f"HOS compliance is solid: {hos_remaining:.1f}h")
-
-    # 1. Timing Feasibility Check (Edge Case: Driver too far for appointment)
-    distance = 0.0
-    if driver.last_known_location in CITY_COORDS:
-        d_lat, d_lon = CITY_COORDS[driver.last_known_location]
-        distance = haversine(d_lat, d_lon, load.pickup_lat, load.pickup_lng)
-    
-    avg_speed = 55.0 # mph
-    transit_hours_required = distance / avg_speed
-    
-    try:
-        pickup_dt = datetime.fromisoformat(load.pickup_time.replace("Z", "+00:00"))
-        now_dt = datetime.now(timezone.utc)
-        time_until_pickup = (pickup_dt - now_dt).total_seconds() / 3600.0
-    except:
-        time_until_pickup = 100.0 # Fallback
-
-    if transit_hours_required > time_until_pickup:
-        score -= 80
-        warnings.append(f"INFEASIBLE: Arrival estimate ({transit_hours_required:.1f}h) exceeds pickup window ({time_until_pickup:.1f}h)")
-    else:
-        reasons.append(f"Timing is feasible: {transit_hours_required:.1f}h vs {time_until_pickup:.1f}h")
-
-    # 2. Sequential & Consolidation Logic (Edge Case: On-Duty but fits/near)
-    is_on_duty = driver.work_status in {"ON_DUTY", "IN_TRANSIT", "DRIVING"}
-    
-    if is_on_duty:
-        # Check Deviation Delta
-        if distance < 30: # If passing right by
-            score += 25
-            reasons.append(f"Strategic Pick: Driver is currently on-duty but passing near pickup ({distance:.1f} mi)")
-        
-        # Check Consolidation Capacity (Mocking current load weight as 20k for now if on-duty)
-        max_capacity = vehicle.gross_vehicle_weight - 35000 if vehicle and vehicle.gross_vehicle_weight else 45000
-        assumed_current_weight = 20000 
-        new_load_weight = load.weight_lbs or 0.0
-        
-        if (assumed_current_weight + new_load_weight) <= max_capacity:
-            score += 15
-            reasons.append(f"LTL Opportunity: Vehicle has capacity for consolidation ({new_load_weight} lbs)")
-        else:
-            score -= 20
-            warnings.append(f"Overweight Risk: Consolidation exceeds vehicle capacity")
-
-    # 3. Proximity Scaling
-    if distance > 350:
-        penalty = min(30, (distance - 350) / 15)
-        score -= penalty
-        warnings.append(f"High Deadhead: Driver is {distance:.1f} mi away")
-    elif distance < 50:
-        score += 10
-        reasons.append(f"Local Favorite: Driver is within 50mi hub ({distance:.1f} mi)")
+        reasons.append(f"Proximity is good: {distance:.1f} mi")
 
     # HOS Penalty
     hos_base = 11.0 if driver.work_status == "AVAILABLE" else 5.5
@@ -1031,7 +851,6 @@ def score_candidate(load: LoadRecord, candidate: DispatchCandidate) -> dict:
 
     score = max(0.0, min(100.0, round(score, 2)))
     feasible = score >= 50 and hos_remaining >= 2.0 # Strict cutoff for feasibility
-    feasible = score >= 50 and hos_remaining >= 2.0 # Strict cutoff for feasibility
 
     return {
         "driver_id": driver.driver_id,
@@ -1042,7 +861,6 @@ def score_candidate(load: LoadRecord, candidate: DispatchCandidate) -> dict:
         "feasible": feasible,
         "reasons": reasons,
         "warnings": warnings,
-        "driver_card": build_driver_card(candidate, load),
         "driver_card": build_driver_card(candidate, load),
     }
 
@@ -1069,24 +887,6 @@ def health_db():
             "status": "error",
             "message": str(e),
         }), 500
-    return jsonify({"status": "ok"})
-
-
-@app.get("/health/db")
-def health_db():
-    try:
-        res = supabase.table("drivers").select("driver_id", count="exact").limit(1).execute()
-        return jsonify({
-            "status": "ok",
-            "drivers_count": res.count,
-        })
-    except Exception as e:
-        return jsonify({
-            "status": "error",
-            "message": str(e),
-        }), 500
-
-
 @app.post("/ingest/drivers")
 def ingest_drivers():
     payload = request.get_json(force=True)
@@ -1220,17 +1020,10 @@ def debug_drivers():
 @app.get("/debug/vehicles")
 def debug_vehicles():
     return jsonify(supabase.table("vehicles").select("*").execute().data)
-    return jsonify(supabase.table("vehicles").select("*").execute().data)
 
 
 @app.get("/debug/performance")
 def debug_performance():
-    return jsonify(supabase.table("driver_performance").select("*").execute().data)
-
-
-@app.get("/debug/vehicle-assignments")
-def debug_vehicle_assignments():
-    return jsonify(supabase.table("vehicle_driver_assignments").select("*").execute().data)
     return jsonify(supabase.table("driver_performance").select("*").execute().data)
 
 
@@ -1406,55 +1199,7 @@ def explain_load_recommendation(load_id: str):
         "ai_rationale": rationale,
         "runner_ups": top_candidates[1:]
     })
-@app.get("/loads/<load_id>/recommendation/explain")
-def explain_load_recommendation(load_id: str):
-    load = fetch_load(load_id)
-    if not load:
-        return jsonify({"error": "Load not found"}), 404
-
-    candidates = build_dispatch_candidates()
-    ranked = [score_candidate(load, candidate) for candidate in candidates]
-    ranked.sort(key=lambda x: (x["feasible"], x["score"]), reverse=True)
-
-    if not ranked:
-        return jsonify({"error": "No candidates found"}), 404
-
-    # Get the top a few candidates to provide context for the AI
-    top_candidates = ranked[:3]
-    top_driver = top_candidates[0]
-
-    # Construction of prompt
-    prompt_lines = [
-        f"We need to recommend the best driver for load #{load_id} going from '{load.pickup_address}' to '{load.dropoff_address}'.",
-        "Our deterministic algorithm has ranked the feasible drivers based on specific weights (e.g., active vehicle, current status in-transit vs off-duty, performance mileage out-of-route, and vehicle matching constraints).",
-        "Please provide a 3-4 sentence professional explanation for dispatchers. Focus on how the weights split, the trade-offs, and why the top driver is fundamentally better. For instance, explain why sticking with an in-transit driver facing slight traffic/delay is better than picking an off-duty operator or switching out an assigned vehicle."
-    ]
-
-    for idx, c in enumerate(top_candidates):
-        rank = idx + 1
-        d = c["driver_card"]
-        prompt_lines.append(
-            f"Rank {rank}: {c['driver_name']} (Score: {c['score']}). "
-            f"Status: {d.get('status_label')}. "
-            f"ETA: {d.get('eta_label')}. "
-            f"Reasons for score: {', '.join(c['reasons'])}. "
-            f"Warnings/Penalties: {', '.join(c['warnings'])}."
-        )
-
-    prompt = "\\n".join(prompt_lines)
-    
-    try:
-        rationale = generate_text(prompt)
-    except Exception as e:
-        rationale = f"AI Generation failed: {str(e)}"
-
-    return jsonify({
-        "top_candidate": top_driver,
-        "ai_rationale": rationale,
-        "runner_ups": top_candidates[1:]
-    })
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=PORT, debug=True)
     app.run(host="0.0.0.0", port=PORT, debug=True)
