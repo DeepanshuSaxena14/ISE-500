@@ -104,6 +104,7 @@ class LoadRecord:
     dropoff_time: str
     required_trailer_type: Optional[str] = None
     required_vehicle_type: Optional[str] = "TRUCK"
+    weight_lbs: Optional[float] = 0.0
     created_at: Optional[str] = None
 
 
@@ -440,6 +441,7 @@ def fetch_load(load_id: str) -> Optional[LoadRecord]:
         dropoff_time=row["dropoff_time"],
         required_trailer_type=row.get("required_trailer_type"),
         required_vehicle_type=row.get("required_vehicle_type"),
+        weight_lbs=float(row.get("weight_lbs", 0.0) or 0.0),
         created_at=row.get("created_at"),
     )
 
@@ -594,19 +596,57 @@ def score_candidate(load: LoadRecord, candidate: DispatchCandidate) -> dict:
     else:
         warnings.append("No performance record found")
 
-    # Proximity Penalty
-    # We need to calculate distance here too to apply the penalty
+    # 1. Timing Feasibility Check (Edge Case: Driver too far for appointment)
     distance = 0.0
     if driver.last_known_location in CITY_COORDS:
         d_lat, d_lon = CITY_COORDS[driver.last_known_location]
         distance = haversine(d_lat, d_lon, load.pickup_lat, load.pickup_lng)
     
-    if distance > 250:
-        penalty = min(20, (distance - 250) / 25)
-        score -= penalty
-        warnings.append(f"Distance to pickup is high: {distance:.1f} mi")
+    avg_speed = 55.0 # mph
+    transit_hours_required = distance / avg_speed
+    
+    try:
+        pickup_dt = datetime.fromisoformat(load.pickup_time.replace("Z", "+00:00"))
+        now_dt = datetime.now(timezone.utc)
+        time_until_pickup = (pickup_dt - now_dt).total_seconds() / 3600.0
+    except:
+        time_until_pickup = 100.0 # Fallback
+
+    if transit_hours_required > time_until_pickup:
+        score -= 80
+        warnings.append(f"INFEASIBLE: Arrival estimate ({transit_hours_required:.1f}h) exceeds pickup window ({time_until_pickup:.1f}h)")
     else:
-        reasons.append(f"Proximity is good: {distance:.1f} mi")
+        reasons.append(f"Timing is feasible: {transit_hours_required:.1f}h vs {time_until_pickup:.1f}h")
+
+    # 2. Sequential & Consolidation Logic (Edge Case: On-Duty but fits/near)
+    is_on_duty = driver.work_status in {"ON_DUTY", "IN_TRANSIT", "DRIVING"}
+    
+    if is_on_duty:
+        # Check Deviation Delta
+        if distance < 30: # If passing right by
+            score += 25
+            reasons.append(f"Strategic Pick: Driver is currently on-duty but passing near pickup ({distance:.1f} mi)")
+        
+        # Check Consolidation Capacity (Mocking current load weight as 20k for now if on-duty)
+        max_capacity = vehicle.gross_vehicle_weight - 35000 if vehicle and vehicle.gross_vehicle_weight else 45000
+        assumed_current_weight = 20000 
+        new_load_weight = load.weight_lbs or 0.0
+        
+        if (assumed_current_weight + new_load_weight) <= max_capacity:
+            score += 15
+            reasons.append(f"LTL Opportunity: Vehicle has capacity for consolidation ({new_load_weight} lbs)")
+        else:
+            score -= 20
+            warnings.append(f"Overweight Risk: Consolidation exceeds vehicle capacity")
+
+    # 3. Proximity Scaling
+    if distance > 350:
+        penalty = min(30, (distance - 350) / 15)
+        score -= penalty
+        warnings.append(f"High Deadhead: Driver is {distance:.1f} mi away")
+    elif distance < 50:
+        score += 10
+        reasons.append(f"Local Favorite: Driver is within 50mi hub ({distance:.1f} mi)")
 
     # HOS Penalty
     hos_base = 11.0 if driver.work_status == "AVAILABLE" else 5.5
